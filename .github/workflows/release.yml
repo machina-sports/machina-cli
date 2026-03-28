@@ -16,8 +16,6 @@ jobs:
             asset: machina-linux-amd64
           - os: macos-latest
             asset: machina-darwin-arm64
-          - os: macos-13
-            asset: machina-darwin-amd64
           - os: windows-latest
             asset: machina-windows-amd64.exe
     runs-on: ${{ matrix.os }}
@@ -55,28 +53,8 @@ jobs:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
 
-  publish-pypi:
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build package
-        run: |
-          pip install build
-          python -m build
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
   github-release:
-    needs: [build-binaries, publish-pypi]
+    needs: [build-binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,3 +73,24 @@ jobs:
             --title "$tag" \
             --generate-notes \
             artifacts/**/*
+
+  publish-pypi:
+    needs: [github-release]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
