@@ -13,6 +13,7 @@ KEYRING_SERVICE = "machina-cli"
 
 DEFAULT_CONFIG = {
     "api_url": "https://api.machina.gg",
+    "session_url": "https://session.machina.gg",
     "default_organization_id": "",
     "default_project_id": "",
     "output_format": "table",

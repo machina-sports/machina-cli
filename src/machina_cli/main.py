@@ -19,6 +19,7 @@ CMDS = [
     ("credentials", "API key management"),
     ("deploy", "Deployment management"),
     ("config", "Configuration management"),
+    ("update", "Update CLI to latest version"),
 ]
 
 
@@ -108,9 +109,19 @@ app.add_typer(config_cmd.app, name="config", help="Configuration management")
 @app.command()
 def login(
     api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key"),
+    with_credentials: bool = typer.Option(False, "--with-credentials", help="Use username/password instead of browser"),
 ):
-    """Shortcut for `machina auth login`."""
-    do_login(api_key=api_key)
+    """Login to the Machina platform. Opens browser by default."""
+    do_login(api_key=api_key, with_credentials=with_credentials)
+
+
+@app.command()
+def update(
+    force: bool = typer.Option(False, "--force", "-f", help="Force update even if already on latest"),
+):
+    """Update machina-cli to the latest version."""
+    from machina_cli.updater import do_update
+    do_update(force=force)
 
 
 @app.command()
