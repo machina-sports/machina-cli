@@ -9,6 +9,20 @@ description = "CLI for the Machina AI Agent platform"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+authors = [{ name = "Machina Sports", email = "eng@machina.gg" }]
+keywords = ["cli", "ai", "agents", "machina", "sports"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "typer[all]>=0.9.0",
     "httpx>=0.27.0",
@@ -17,8 +31,20 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.urls]
+Homepage = "https://machina.gg"
+Repository = "https://github.com/machina-sports/machina-cli"
+Issues = "https://github.com/machina-sports/machina-cli/issues"
+
 [project.scripts]
 machina = "machina_cli.main:app"
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/machina_cli"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100

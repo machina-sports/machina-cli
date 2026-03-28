@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: machina-linux-amd64
+          - os: macos-latest
+            asset: machina-darwin-arm64
+          - os: macos-13
+            asset: machina-darwin-amd64
+          - os: windows-latest
+            asset: machina-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build binary
+        run: >
+          pyinstaller
+          --onefile
+          --name ${{ matrix.asset }}
+          --hidden-import machina_cli
+          --hidden-import machina_cli.commands
+          --hidden-import machina_cli.commands.auth
+          --hidden-import machina_cli.commands.org
+          --hidden-import machina_cli.commands.project
+          --hidden-import machina_cli.commands.credentials
+          --hidden-import machina_cli.commands.deploy
+          --hidden-import machina_cli.commands.config_cmd
+          --collect-all machina_cli
+          src/machina_cli/main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: [build-binaries, publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --generate-notes \
+            artifacts/**/*
