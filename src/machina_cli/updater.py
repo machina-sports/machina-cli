@@ -51,6 +51,27 @@ def _detect_platform() -> str:
     return f"{os_name}-{arch}"
 
 
+def _show_release_notes(version: str):
+    """Fetch and display release notes from GitHub."""
+    try:
+        url = f"https://api.github.com/repos/{REPO}/releases/tags/v{version}"
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(url, headers={"Accept": "application/vnd.github.v3+json"})
+            if resp.status_code == 200:
+                body = resp.json().get("body", "").strip()
+                if body:
+                    console.print(f"  [bold]What's new in v{version}:[/bold]")
+                    # Show first ~15 lines of release notes
+                    lines = body.split("\n")[:15]
+                    for line in lines:
+                        console.print(f"  [dim]{line}[/dim]")
+                    if len(body.split("\n")) > 15:
+                        console.print(f"  [dim]... (see full notes at github.com/{REPO}/releases/tag/v{version})[/dim]")
+                    console.print()
+    except Exception:
+        pass
+
+
 def do_update(force: bool = False) -> bool:
     """
     Run the self-update by downloading the latest binary from GitHub Releases.
@@ -73,6 +94,8 @@ def do_update(force: bool = False) -> bool:
         console.print("  [green]Already up to date.[/green]")
         return False
 
+    # Show what's new from the GitHub release notes
+    _show_release_notes(latest)
     console.print()
 
     plat = _detect_platform()

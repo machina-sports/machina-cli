@@ -1,0 +1,108 @@
+# Changelog
+
+All notable changes to machina-cli are documented here.
+
+## [0.2.11] - 2026-03-29
+
+### Added
+- **Release notes on update**: `machina update` now shows "What's new" from GitHub Release notes before downloading
+- **Changelog-driven releases**: GitHub Actions extracts notes from CHANGELOG.md for each release instead of auto-generated notes
+
+### Changed
+- Synced `__version__` in `__init__.py` with `pyproject.toml`
+
+## [0.2.10] - 2026-03-29
+
+### Added
+- **Agent activity view**: `agent get <name>` now shows full agent detail — workflows with descriptions and conditions, context variables, scheduling status, frequency, last execution time
+- **Agent list improvements**: shows title, scheduled status, and last execution in the list view
+
+## [0.2.9] - 2026-03-29
+
+### Fixed
+- **CLI login flow**: new `/cli/auth` page and `/api/auth/cli-token` API endpoint in machina-session — fixes login when user is already authenticated with Clerk (previously redirected to Studio instead of completing CLI auth)
+- **Timeout fallback**: when browser auth times out, shows clear instructions for alternative auth methods (`--api-key` or `--with-credentials`)
+
+## [0.2.8] - 2026-03-29
+
+### Fixed
+- Removed customer-specific references from README
+
+## [0.2.7] - 2026-03-29
+
+### Fixed
+- Ruff linting errors that blocked the CI pipeline
+
+## [0.2.6] - 2026-03-29
+
+### Fixed
+- CI/CD pipeline: added `contents: write` and `id-token: write` permissions for PyPI OIDC trusted publisher
+
+## [0.2.5] - 2026-03-29
+
+### Added
+- **Connector commands**: `connector list`, `connector get <name>`
+- **Mapping commands**: `mapping list`, `mapping get <name>`
+- **Prompt commands**: `prompt list`, `prompt get <name>` (shows content preview)
+- **Document commands**: `document list`, `document get <id>` (shows content preview)
+- All new commands support `--json`, `--limit`, `--page`, `--project`
+
+## [0.2.4] - 2026-03-29
+
+### Changed
+- **Execution commands reworked**: `execution get` now uses correct `agent-run` API endpoint, shows name, status, execution time, workflow count, response JSON, and individual workflow statuses
+- **Updater simplified**: always downloads binary from GitHub Releases to `/usr/local/bin` — no more install method detection confusion
+- **Dropped keyring dependency**: credentials stored in `~/.machina/credentials.json` with chmod 600 (no more macOS Keychain password popups)
+
+## [0.2.3] - 2026-03-29
+
+### Added
+- **Pagination everywhere**: `org list`, `project list` now support `--limit`, `--page`, `--json`
+- **REPL bare flags**: type `project list limit 5` instead of `project list --limit 5` inside the REPL
+
+### Fixed
+- REPL `--help` and `-h` now show help instead of erroring
+- REPL auto-strips `machina` prefix if typed by habit
+
+## [0.2.1] - 2026-03-29
+
+### Fixed
+- REPL `click.exceptions.SystemExit` import error (removed, using built-in `SystemExit`)
+- REPL now ignores `machina` prefix when user types `machina agent list` inside session
+
+## [0.2.0] - 2026-03-29
+
+### Added
+- **Interactive REPL mode**: run `machina` with no arguments to enter an interactive session with tab completion, command history, and org/project context in the prompt
+- **Execution commands**: `execution get <id>`, `execution list`
+- **Credentials improvements**: `--show-keys` to reveal full API keys, `--copy client-api` to copy to clipboard
+- **Shell prompt**: `machina shell-prompt` outputs `✦ OrgName/ProjectName` for terminal integration
+- **Grouped help**: banner and REPL help organized by category (Platform, Resources, Operations)
+- Org/project names resolved and saved on `use` command
+
+## [0.1.1] - 2026-03-29
+
+### Fixed
+- **Org list**: reads `organization_name`, `organization_slug`, `organization_id` from API (was reading wrong fields)
+- **Project list**: reads `project_name`, `project_slug`, `project_id` from API lookup
+- **Banner colors**: works on both light and dark terminal themes
+- **Dynamic version**: uses `importlib.metadata` instead of hardcoded `__version__`
+
+## [0.1.0] - 2026-03-29
+
+### Added
+- **Browser login**: opens browser for Clerk SSO / magic link authentication
+- **API key login**: `machina login --api-key <key>` for CI/CD
+- **Username/password login**: `machina login --with-credentials` for dev environments
+- **Self-update**: `machina update` downloads latest binary from GitHub Releases
+- **Organization commands**: `org list`, `org create`, `org use`
+- **Project commands**: `project list`, `project create`, `project use`, `project status`
+- **Workflow commands**: `workflow list`, `workflow get <name>`
+- **Agent commands**: `agent list`, `agent get <name>`, `agent executions`
+- **Template commands**: `template list` (browse Git repository)
+- **Credentials commands**: `credentials list`, `credentials generate`, `credentials revoke`
+- **Deploy commands**: `deploy start`, `deploy status`, `deploy restart`
+- **Config commands**: `config list`, `config set`, `config get`
+- **ASCII banner**: MACHINA ✦ SPORTS wordmark on launch
+- Secure credential storage in `~/.machina/credentials.json`
+- Config in `~/.machina/config.json`

@@ -65,6 +65,19 @@ jobs:
         with:
           path: artifacts/
 
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          # Extract section for this version from CHANGELOG.md
+          notes=$(awk "/^## \[${version}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md)
+          if [ -z "$notes" ]; then
+            notes="Release ${tag}"
+          fi
+          # Write to file for gh release
+          echo "$notes" > release_notes.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -72,7 +85,7 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           gh release create "$tag" \
             --title "$tag" \
-            --generate-notes \
+            --notes-file release_notes.md \
             artifacts/**/*
 
   publish-pypi:
