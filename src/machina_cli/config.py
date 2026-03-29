@@ -5,11 +5,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import keyring
-
 CONFIG_DIR = Path.home() / ".machina"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-KEYRING_SERVICE = "machina-cli"
+CREDS_FILE = CONFIG_DIR / "credentials.json"
 
 DEFAULT_CONFIG = {
     "api_url": "https://api.machina.gg",
@@ -36,7 +34,6 @@ def save_config(config: dict):
     ensure_config_dir()
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
-    # Restrict permissions on config file
     os.chmod(CONFIG_FILE, 0o600)
 
 
@@ -51,52 +48,37 @@ def set_config(key: str, value: str):
     save_config(config)
 
 
+def _load_creds() -> dict:
+    ensure_config_dir()
+    if CREDS_FILE.exists():
+        with open(CREDS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_creds(creds: dict):
+    ensure_config_dir()
+    with open(CREDS_FILE, "w") as f:
+        json.dump(creds, f, indent=2)
+    os.chmod(CREDS_FILE, 0o600)
+
+
 def store_credential(key: str, value: str):
-    """Store a credential in the OS keyring, fallback to file."""
-    try:
-        keyring.set_password(KEYRING_SERVICE, key, value)
-    except Exception:
-        # Fallback: store in config file
-        creds_file = CONFIG_DIR / "credentials.json"
-        creds = {}
-        if creds_file.exists():
-            with open(creds_file) as f:
-                creds = json.load(f)
-        creds[key] = value
-        with open(creds_file, "w") as f:
-            json.dump(creds, f, indent=2)
-        os.chmod(creds_file, 0o600)
+    """Store a credential in ~/.machina/credentials.json (chmod 600)."""
+    creds = _load_creds()
+    creds[key] = value
+    _save_creds(creds)
 
 
 def get_credential(key: str) -> Optional[str]:
-    """Retrieve a credential from the OS keyring, fallback to file."""
-    try:
-        value = keyring.get_password(KEYRING_SERVICE, key)
-        if value:
-            return value
-    except Exception:
-        pass
-
-    # Fallback: read from file
-    creds_file = CONFIG_DIR / "credentials.json"
-    if creds_file.exists():
-        with open(creds_file) as f:
-            creds = json.load(f)
-        return creds.get(key)
-    return None
+    """Retrieve a credential from ~/.machina/credentials.json."""
+    return _load_creds().get(key)
 
 
 def clear_credentials():
     """Remove all stored credentials."""
-    for key in ("api_key", "session_token"):
-        try:
-            keyring.delete_password(KEYRING_SERVICE, key)
-        except Exception:
-            pass
-
-    creds_file = CONFIG_DIR / "credentials.json"
-    if creds_file.exists():
-        creds_file.unlink()
+    if CREDS_FILE.exists():
+        CREDS_FILE.unlink()
 
 
 def get_api_url() -> str:
