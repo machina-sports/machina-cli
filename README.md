@@ -46,7 +46,9 @@ machina agent list
 machina template list
 ```
 
-Or launch the **interactive session** — just type `machina` with no arguments:
+## Interactive Session
+
+Run `machina` with no arguments to open an interactive REPL:
 
 ```
 $ machina
@@ -60,8 +62,19 @@ $ machina
 
 ✦ Entain Organization/sbot-stg > workflow list
 ✦ Entain Organization/sbot-stg > agent list
+✦ Entain Organization/sbot-stg > project list limit 5
 ✦ Entain Organization/sbot-stg > exit
 ```
+
+Inside the session you can type commands without the `machina` prefix and without `--` before flags:
+
+```
+workflow list              # same as: machina workflow list
+project list limit 5       # same as: machina project list --limit 5
+credentials list json      # same as: machina credentials list --json
+```
+
+Features: tab completion, command history (persisted in `~/.machina/history`), current org/project in prompt.
 
 ## Authentication
 
@@ -77,14 +90,6 @@ Credentials are stored locally in `~/.machina/credentials.json` (file permission
 
 ## Commands
 
-### Interactive Session
-
-```bash
-machina                                # Open interactive REPL with tab completion
-```
-
-Inside the session, type commands without the `machina` prefix (e.g. `workflow list` instead of `machina workflow list`). Features: tab completion, command history, current org/project in prompt.
-
 ### Platform
 
 ```bash
@@ -99,6 +104,9 @@ machina auth whoami                    # Show current user info
 
 ```bash
 machina org list                       # List organizations
+machina org list --limit 5             # Paginate (5 per page)
+machina org list --page 2              # Page 2
+machina org list --json                # Output as JSON
 machina org create <name>              # Create organization
 machina org use <org-id>               # Set default organization
 ```
@@ -107,6 +115,8 @@ machina org use <org-id>               # Set default organization
 
 ```bash
 machina project list                   # List projects
+machina project list --limit 10        # Paginate (10 per page)
+machina project list --json            # Output as JSON
 machina project create <name>          # Create project
 machina project use <project-id>       # Set default project
 machina project status                 # Deployment status
@@ -116,15 +126,19 @@ machina project status                 # Deployment status
 
 ```bash
 machina workflow list                  # List workflows
+machina workflow list --limit 50       # Paginate
 machina workflow list --json           # Output as JSON
 machina workflow get <name>            # Get workflow details
+machina workflow get <name> --json     # Workflow details as JSON
 ```
 
 ### Agents
 
 ```bash
 machina agent list                     # List agents
+machina agent list --json              # Output as JSON
 machina agent get <name>               # Get agent details
+machina agent get <name> --json        # Agent details as JSON
 machina agent executions               # List recent executions
 ```
 
@@ -132,6 +146,7 @@ machina agent executions               # List recent executions
 
 ```bash
 machina execution list                 # List recent executions
+machina execution list --limit 50      # Paginate
 machina execution get <id>             # Get execution details
 machina execution get <id> --compact   # Compact output
 machina execution get <id> --json      # Full JSON output
@@ -142,6 +157,7 @@ machina execution get <id> --json      # Full JSON output
 ```bash
 machina template list                  # Browse template repository
 machina template list --repo <url>     # Browse a custom repository
+machina template list --branch dev     # Specific branch
 machina template list --json           # Output as JSON
 ```
 
@@ -152,6 +168,7 @@ machina credentials list               # List API keys (masked)
 machina credentials list --show-keys   # List API keys (full)
 machina credentials list --copy client-api  # Copy key to clipboard
 machina credentials generate           # Generate new API key
+machina credentials generate --name my-key  # Custom key name
 machina credentials revoke <key-id>    # Revoke an API key
 ```
 
@@ -181,14 +198,22 @@ machina version                        # Show current version
 
 ## Global Options
 
-Most resource commands support:
+All list commands support pagination and JSON output:
 
-| Flag | Description |
-|------|-------------|
-| `--json`, `-j` | Output raw JSON (useful for piping to `jq`) |
-| `--project`, `-p` | Override default project for this command |
-| `--limit`, `-l` | Items per page (default: 20) |
-| `--page` | Page number for pagination |
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--limit` | `-l` | Items per page (default: 20) |
+| `--page` | | Page number for pagination |
+| `--json` | `-j` | Output raw JSON (useful for piping to `jq`) |
+| `--project` | `-p` | Override default project for this command |
+
+Examples:
+
+```bash
+machina project list --limit 5 --page 2    # 5 items, page 2
+machina workflow list --json | jq '.[].name'  # Pipe to jq
+machina agent list -p <other-project-id>   # Different project
+```
 
 ## Configuration
 

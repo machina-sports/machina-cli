@@ -14,18 +14,27 @@ console = Console()
 
 
 @app.command("list")
-def list_orgs():
+def list_orgs(
+    page: int = typer.Option(1, "--page", help="Page number"),
+    page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
     """List your organizations."""
     client = MachinaClient()
     result = client.post("user/organizations/search", {
         "filters": {},
-        "page": 1,
-        "page_size": 50,
+        "page": page,
+        "page_size": page_size,
         "sorters": ["name", 1],
     })
 
     orgs = result.get("data", [])
     default_org = get_config("default_organization_id")
+
+    if json_output:
+        import json
+        console.print_json(json.dumps(orgs, default=str))
+        return
 
     if not orgs:
         console.print("[yellow]No organizations found.[/yellow]")
@@ -39,7 +48,6 @@ def list_orgs():
     table.add_column("Default", justify="center")
 
     for org in orgs:
-        # API returns user_access_organization records with organization_ prefix
         org_id = org.get("organization_id", org.get("_id", ""))
         is_default = "✦" if org_id == default_org else ""
         table.add_row(
@@ -51,6 +59,11 @@ def list_orgs():
         )
 
     console.print(table)
+
+    pagination = result.get("pagination", {})
+    total = pagination.get("total", pagination.get("total_documents", 0))
+    if total:
+        console.print(f"\n  [dim]Page {page} ({len(orgs)} of {total} organizations)[/dim]")
 
 
 @app.command()

@@ -165,21 +165,21 @@ def _dispatch(line: str):
 
     # Auto-fix bare flags: "limit 50" → "--limit 50", "json" → "--json", etc.
     # This lets users type `workflow list limit 50` instead of `workflow list --limit 50`
+    # Only apply AFTER the subcommand (first 2 args are command + subcommand)
     KNOWN_FLAGS = {
-        "limit", "page", "project", "org", "json", "compact",
+        "limit", "page", "json", "compact",
         "show-keys", "copy", "repo", "branch", "private", "force",
         "api-key", "with-credentials", "username", "password",
-        "name", "slug", "level", "version",
+        "slug", "level",
     }
-    fixed_args = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
+    # Find where flags start (skip command words like "project list", "workflow get")
+    flag_start = min(2, len(args))
+    fixed_args = list(args[:flag_start])
+    for arg in args[flag_start:]:
         if arg.lower() in KNOWN_FLAGS and not arg.startswith("-"):
             fixed_args.append(f"--{arg.lower()}")
         else:
             fixed_args.append(arg)
-        i += 1
     args = fixed_args
 
     # Dispatch to typer — import the app and invoke programmatically

@@ -15,18 +15,27 @@ console = Console()
 
 
 @app.command("list")
-def list_projects():
+def list_projects(
+    page: int = typer.Option(1, "--page", help="Page number"),
+    page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
     """List your projects."""
     client = MachinaClient()
     result = client.post("user/projects/search", {
         "filters": {},
-        "page": 1,
-        "page_size": 50,
+        "page": page,
+        "page_size": page_size,
         "sorters": ["name", 1],
     })
 
     projects = result.get("data", [])
     default_project = get_config("default_project_id")
+
+    if json_output:
+        import json
+        console.print_json(json.dumps(projects, default=str))
+        return
 
     if not projects:
         console.print("[yellow]No projects found.[/yellow]")
@@ -41,7 +50,6 @@ def list_projects():
     table.add_column("Default", justify="center")
 
     for proj in projects:
-        # API returns user_access_project records with project_ prefix from lookup
         proj_id = proj.get("project_id", proj.get("_id", ""))
         is_default = "✦" if proj_id == default_project else ""
         table.add_row(
@@ -54,6 +62,11 @@ def list_projects():
         )
 
     console.print(table)
+
+    pagination = result.get("pagination", {})
+    total = pagination.get("total", pagination.get("total_documents", 0))
+    if total:
+        console.print(f"\n  [dim]Page {page} ({len(projects)} of {total} projects)[/dim]")
 
 
 @app.command()
