@@ -37,6 +37,13 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global _auth_result
         parsed = urlparse(self.path)
+
+        # Only process requests to /callback — ignore favicon, etc.
+        if parsed.path != "/callback":
+            self.send_response(204)
+            self.end_headers()
+            return
+
         params = parse_qs(parsed.query)
 
         token = params.get("token", [None])[0]
@@ -56,6 +63,7 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
         html = """<!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Machina CLI</title>
     <style>
         body {
@@ -91,6 +99,7 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
         html = f"""<!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Machina CLI - Error</title>
     <style>
         body {{
