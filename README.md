@@ -54,16 +54,16 @@ Run `machina` with no arguments to open an interactive REPL:
 $ machina
 
   ✦ Machina CLI v0.2.2
-  Organization: Entain Organization
-  Project:      sbot-stg
+  Organization: Acme Corp
+  Project:      demo-project
 
   Type a command (e.g. `workflow list`) or `help` for commands.
   Press Ctrl+D or type `exit` to quit.
 
-✦ Entain Organization/sbot-stg > workflow list
-✦ Entain Organization/sbot-stg > agent list
-✦ Entain Organization/sbot-stg > project list limit 5
-✦ Entain Organization/sbot-stg > exit
+✦ Acme Corp/demo-project > workflow list
+✦ Acme Corp/demo-project > agent list
+✦ Acme Corp/demo-project > project list limit 5
+✦ Acme Corp/demo-project > exit
 ```
 
 Inside the session you can type commands without the `machina` prefix and without `--` before flags:
