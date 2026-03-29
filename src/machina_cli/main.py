@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 from machina_cli import __version__
-from machina_cli.commands import auth, org, project, credentials, deploy, config_cmd
+from machina_cli.commands import auth, org, project, credentials, deploy, config_cmd, workflow, agent, template
 from machina_cli.commands.auth import do_login
 
 console = Console()
@@ -16,9 +16,11 @@ CMDS = [
     ("login", "Authenticate with the platform"),
     ("org", "Organization management"),
     ("project", "Project management"),
+    ("workflow", "Workflow management"),
+    ("agent", "Agent management"),
+    ("template", "Template management"),
     ("credentials", "API key management"),
     ("deploy", "Deployment management"),
-    ("config", "Configuration management"),
     ("update", "Update CLI to latest version"),
 ]
 
@@ -111,9 +113,42 @@ def main(ctx: typer.Context):
 app.add_typer(auth.app, name="auth", help="Authentication (login, logout, whoami)")
 app.add_typer(org.app, name="org", help="Organization management")
 app.add_typer(project.app, name="project", help="Project management")
+app.add_typer(workflow.app, name="workflow", help="Workflow management")
+app.add_typer(agent.app, name="agent", help="Agent management")
+app.add_typer(template.app, name="template", help="Template management")
 app.add_typer(credentials.app, name="credentials", help="API key management")
 app.add_typer(deploy.app, name="deploy", help="Deployment management")
 app.add_typer(config_cmd.app, name="config", help="Configuration management")
+
+
+@app.command(hidden=True)
+def shell_prompt():
+    """Output current session info for shell prompt integration.
+
+    Add to your .zshrc / .bashrc:
+        export MACHINA_PROMPT=$(machina shell-prompt 2>/dev/null)
+
+    Or for dynamic prompt (slower, runs each time):
+        machina_prompt() { machina shell-prompt 2>/dev/null; }
+        PROMPT='$(machina_prompt) %~ %# '
+    """
+    from machina_cli.config import get_config, resolve_auth_token
+
+    _, token = resolve_auth_token()
+    if not token:
+        return
+
+    org_name = get_config("default_organization_name") or ""
+    proj_name = get_config("default_project_name") or ""
+
+    if org_name and proj_name:
+        print(f"✦ {org_name}/{proj_name}")
+    elif org_name:
+        print(f"✦ {org_name}")
+    elif proj_name:
+        print(f"✦ {proj_name}")
+    else:
+        print("✦ machina")
 
 
 @app.command()
