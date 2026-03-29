@@ -4,7 +4,6 @@ from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.tree import Tree
 
 from machina_cli.project_client import ProjectClient

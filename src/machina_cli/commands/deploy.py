@@ -77,6 +77,6 @@ def restart(
 
     console.print(f"Restarting API for organization {org_id}...")
 
-    result = client.post(f"organization/{org_id}/restart-api", {})
+    client.post(f"organization/{org_id}/restart-api", {})
 
     console.print("[green]API restarted successfully.[/green]")

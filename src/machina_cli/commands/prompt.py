@@ -6,7 +6,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.syntax import Syntax
 
 from machina_cli.project_client import ProjectClient
 

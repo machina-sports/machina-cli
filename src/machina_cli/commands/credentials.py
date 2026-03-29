@@ -40,7 +40,7 @@ def generate(
     })
 
     api_key = result.get("data", {}).get("api_key", "")
-    console.print(f"\n[green]API key generated:[/green]\n")
+    console.print("\n[green]API key generated:[/green]\n")
     console.print(f"  [bold]{api_key}[/bold]\n")
     console.print("[dim]Save this key securely — it won't be shown again.[/dim]")
 
@@ -123,6 +123,6 @@ def revoke(
     """Revoke an API key."""
     client = MachinaClient()
 
-    result = client.post("system/api/revoke-key", {"api_key_id": key_id})
+    client.post("system/api/revoke-key", {"api_key_id": key_id})
 
     console.print(f"[green]API key {key_id} revoked.[/green]")

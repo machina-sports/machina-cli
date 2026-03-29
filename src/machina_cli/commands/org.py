@@ -91,7 +91,7 @@ def create(
     # Set as default if no default exists
     if not get_config("default_organization_id"):
         set_config("default_organization_id", org_id)
-        console.print(f"Set as default organization.")
+        console.print("Set as default organization.")
 
 
 @app.command()

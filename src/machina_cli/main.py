@@ -1,7 +1,7 @@
 """Machina CLI — Command line interface for the Machina AI Agent platform."""
 
 import typer
-from rich.console import Console, Group
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text

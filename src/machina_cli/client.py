@@ -1,6 +1,6 @@
 """HTTP client for Machina Core API."""
 
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 from rich.console import Console

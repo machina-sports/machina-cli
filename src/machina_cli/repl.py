@@ -6,7 +6,6 @@ Shows current org/project context in the prompt. Exit with `exit` or Ctrl+D.
 
 import readline
 import shlex
-import sys
 import os
 
 from rich.console import Console
@@ -94,7 +93,7 @@ def _show_repl_banner():
     title.append("✦ ", style="bold #FF5C1F")
     title.append("Machina CLI", style="bold")
     title.append(f" v{__version__}", style="dim")
-    console.print(f"  ", end="")
+    console.print("  ", end="")
     console.print(title)
 
     _, token = resolve_auth_token()

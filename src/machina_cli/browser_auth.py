@@ -166,8 +166,8 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
 
     try:
         console.print()
-        console.print(f"  [bold]Opening browser to authenticate...[/bold]")
-        console.print(f"  [dim]If the browser doesn't open, visit:[/dim]")
+        console.print("  [bold]Opening browser to authenticate...[/bold]")
+        console.print("  [dim]If the browser doesn't open, visit:[/dim]")
         console.print(f"  [link={auth_url}]{auth_url}[/link]")
         console.print()
 
