@@ -2,7 +2,7 @@
 
 All notable changes to machina-cli are documented here.
 
-## [0.2.12] - 2026-03-29
+## [0.2.13] - 2026-03-29
 
 ### Added
 - **Run agents from CLI**: `machina agent run <name>` — run agents with interactive input prompts or inline `key=value` parameters. Supports `--sync`, `--watch`, and `--json` modes
