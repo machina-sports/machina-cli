@@ -29,12 +29,12 @@ SUB_COMMANDS = {
     "project": ["list", "create", "use", "status"],
     "workflow": ["list", "get"],
     "agent": ["list", "get", "executions"],
-    "template": ["list", "search"],
+    "template": ["list"],
     "credentials": ["list", "generate", "revoke"],
     "deploy": ["start", "status", "restart"],
     "config": ["list", "set", "get"],
     "auth": ["login", "logout", "whoami"],
-    "execution": ["get"],
+    "execution": ["get", "list"],
 }
 
 
@@ -120,7 +120,7 @@ def _show_help():
         ("workflow list|get <name>", "Workflow management"),
         ("agent list|get <name>|executions", "Agent management"),
         ("execution get <id>", "Get execution details"),
-        ("template list|search", "Template management"),
+        ("template list", "Browse template repository"),
         ("credentials list|generate|revoke", "API key management"),
         ("deploy start|status|restart", "Deployment management"),
         ("config list|set|get", "Configuration"),
