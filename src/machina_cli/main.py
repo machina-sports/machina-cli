@@ -7,21 +7,36 @@ from rich.table import Table
 from rich.text import Text
 
 from machina_cli import __version__
-from machina_cli.commands import auth, org, project, credentials, deploy, config_cmd, workflow, agent, template, execution
+from machina_cli.commands import (
+    auth, org, project, credentials, deploy, config_cmd,
+    workflow, agent, template, execution,
+    connector, mapping, prompt, document,
+)
 from machina_cli.commands.auth import do_login
 
 console = Console()
 
-CMDS = [
-    ("login", "Authenticate with the platform"),
-    ("org", "Organization management"),
-    ("project", "Project management"),
-    ("workflow", "Workflow management"),
-    ("agent", "Agent management"),
-    ("template", "Template management"),
-    ("credentials", "API key management"),
-    ("deploy", "Deployment management"),
-    ("update", "Update CLI to latest version"),
+CMD_GROUPS = [
+    ("Platform", [
+        ("login", "Authenticate"),
+        ("org", "Organizations"),
+        ("project", "Projects"),
+        ("credentials", "API keys"),
+    ]),
+    ("Resources", [
+        ("workflow", "Workflows"),
+        ("agent", "Agents"),
+        ("connector", "Connectors"),
+        ("mapping", "Mappings"),
+        ("prompt", "Prompts"),
+        ("document", "Documents"),
+    ]),
+    ("Operations", [
+        ("execution", "Executions"),
+        ("template", "Templates"),
+        ("deploy", "Deployments"),
+        ("update", "Self-update"),
+    ]),
 ]
 
 
@@ -64,18 +79,18 @@ def build_wordmark() -> Panel:
 
 def build_commands_panel() -> Panel:
     lines = Text()
-    for i, (name, desc) in enumerate(CMDS):
-        cmd = Text(f"machina {name:<14}", style="bold bright_red")
-        d = Text(f" {desc}", style="dim")
-        lines.append_text(cmd)
-        lines.append_text(d)
-        if i < len(CMDS) - 1:
+    for gi, (group_name, cmds) in enumerate(CMD_GROUPS):
+        lines.append(f"{group_name}\n", style="bold underline")
+        for name, desc in cmds:
+            lines.append(f"  {name:<14}", style="bold #FF5C1F")
+            lines.append(f"{desc}\n", style="dim")
+        if gi < len(CMD_GROUPS) - 1:
             lines.append("\n")
     return Panel(
         lines,
         border_style="#FF5C1F",
         expand=False,
-        padding=(1, 2),
+        padding=(1, 1),
     )
 
 
@@ -124,6 +139,10 @@ app.add_typer(workflow.app, name="workflow", help="Workflow management")
 app.add_typer(agent.app, name="agent", help="Agent management")
 app.add_typer(template.app, name="template", help="Template management")
 app.add_typer(execution.app, name="execution", help="Execution management")
+app.add_typer(connector.app, name="connector", help="Connector management")
+app.add_typer(mapping.app, name="mapping", help="Mapping management")
+app.add_typer(prompt.app, name="prompt", help="Prompt management")
+app.add_typer(document.app, name="document", help="Document management")
 app.add_typer(credentials.app, name="credentials", help="API key management")
 app.add_typer(deploy.app, name="deploy", help="Deployment management")
 app.add_typer(config_cmd.app, name="config", help="Configuration management")

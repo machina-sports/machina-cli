@@ -18,7 +18,8 @@ console = Console()
 
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
-    "org", "project", "workflow", "agent", "template",
+    "org", "project", "workflow", "agent", "connector",
+    "mapping", "prompt", "document", "template", "execution",
     "credentials", "deploy", "config", "auth",
     "help", "exit", "quit", "clear",
 ]
@@ -29,12 +30,16 @@ SUB_COMMANDS = {
     "project": ["list", "create", "use", "status"],
     "workflow": ["list", "get"],
     "agent": ["list", "get", "executions"],
+    "connector": ["list", "get"],
+    "mapping": ["list", "get"],
+    "prompt": ["list", "get"],
+    "document": ["list", "get"],
     "template": ["list"],
+    "execution": ["get", "list"],
     "credentials": ["list", "generate", "revoke"],
     "deploy": ["start", "status", "restart"],
     "config": ["list", "set", "get"],
     "auth": ["login", "logout", "whoami"],
-    "execution": ["get", "list"],
 }
 
 
@@ -111,25 +116,39 @@ def _show_repl_banner():
 
 def _show_help():
     """Show REPL help."""
-    console.print()
-    console.print("  [bold]Available commands:[/bold]")
-    console.print()
-    cmds = [
-        ("org list|create|use", "Organization management"),
-        ("project list|create|use|status", "Project management"),
-        ("workflow list|get <name>", "Workflow management"),
-        ("agent list|get <name>|executions", "Agent management"),
-        ("execution get <id>", "Get execution details"),
-        ("template list", "Browse template repository"),
-        ("credentials list|generate|revoke", "API key management"),
-        ("deploy start|status|restart", "Deployment management"),
-        ("config list|set|get", "Configuration"),
-        ("auth login|logout|whoami", "Authentication"),
-        ("clear", "Clear screen"),
-        ("exit", "Exit session"),
+    groups = [
+        ("Platform", [
+            ("org list|create|use", "Organizations"),
+            ("project list|create|use|status", "Projects"),
+            ("credentials list|generate|revoke", "API keys"),
+            ("auth login|logout|whoami", "Authentication"),
+        ]),
+        ("Resources", [
+            ("workflow list|get <name>", "Workflows"),
+            ("agent list|get <name>|executions", "Agents"),
+            ("connector list|get <name>", "Connectors"),
+            ("mapping list|get <name>", "Mappings"),
+            ("prompt list|get <name>", "Prompts"),
+            ("document list|get <id>", "Documents"),
+        ]),
+        ("Operations", [
+            ("execution list|get <id>", "Execution history"),
+            ("template list", "Template repository"),
+            ("deploy start|status|restart", "Deployments"),
+            ("config list|set|get", "Configuration"),
+        ]),
+        ("Session", [
+            ("clear", "Clear screen"),
+            ("exit", "Exit session"),
+        ]),
     ]
-    for cmd, desc in cmds:
-        console.print(f"    [bold #FF5C1F]{cmd:<38}[/bold #FF5C1F] [dim]{desc}[/dim]")
+    console.print()
+    for group_name, cmds in groups:
+        console.print(f"  [bold underline]{group_name}[/bold underline]")
+        for cmd, desc in cmds:
+            console.print(f"    [bold #FF5C1F]{cmd:<38}[/bold #FF5C1F] [dim]{desc}[/dim]")
+        console.print()
+    console.print("  [dim]All list commands support:[/dim] --limit N  --page N  --json")
     console.print()
 
 
@@ -149,7 +168,7 @@ def _dispatch(line: str):
     if cmd in ("exit", "quit"):
         raise EOFError()
 
-    if cmd == "help":
+    if cmd in ("help", "--help", "-h"):
         _show_help()
         return
 

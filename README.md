@@ -142,6 +142,39 @@ machina agent get <name> --json        # Agent details as JSON
 machina agent executions               # List recent executions
 ```
 
+### Connectors
+
+```bash
+machina connector list                 # List connectors
+machina connector list --json          # Output as JSON
+machina connector get <name>           # Get connector details
+```
+
+### Mappings
+
+```bash
+machina mapping list                   # List mappings
+machina mapping list --json            # Output as JSON
+machina mapping get <name>             # Get mapping details
+```
+
+### Prompts
+
+```bash
+machina prompt list                    # List prompts
+machina prompt list --json             # Output as JSON
+machina prompt get <name>              # Get prompt with content preview
+```
+
+### Documents
+
+```bash
+machina document list                  # List documents
+machina document list --limit 50       # Paginate
+machina document list --json           # Output as JSON
+machina document get <id>              # Get document with content preview
+```
+
 ### Executions
 
 ```bash
