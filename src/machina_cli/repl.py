@@ -157,18 +157,20 @@ def _dispatch(line: str):
         os.system("clear" if os.name != "nt" else "cls")
         return
 
+    # Strip "machina" prefix if user types it out of habit
+    if cmd == "machina":
+        args = args[1:]
+        if not args:
+            return
+
     # Dispatch to typer — import the app and invoke programmatically
     from machina_cli.main import app as typer_app
-    from click.exceptions import SystemExit as ClickExit
 
     try:
         typer_app(args, standalone_mode=False)
-    except ClickExit:
-        pass
-    except SystemExit as e:
+    except SystemExit:
         # Swallow SystemExit so it doesn't kill the REPL
-        if e.code and e.code != 0:
-            pass
+        pass
     except Exception as e:
         console.print(f"  [red]Error: {e}[/red]")
 
