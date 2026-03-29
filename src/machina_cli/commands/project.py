@@ -96,6 +96,23 @@ def use(
 ):
     """Set default project."""
     set_config("default_project_id", project_id)
+
+    # Try to resolve project name for display and shell prompt
+    try:
+        client = MachinaClient()
+        result = client.post("user/projects/search", {
+            "filters": {}, "page": 1, "page_size": 100, "sorters": ["name", 1],
+        })
+        for proj in result.get("data", []):
+            if proj.get("project_id") == project_id:
+                name = proj.get("project_name", "")
+                if name:
+                    set_config("default_project_name", name)
+                console.print(f"Default project set to [bold]{name or project_id}[/bold]")
+                return
+    except Exception:
+        pass
+
     console.print(f"Default project set to [bold]{project_id}[/bold]")
 
 

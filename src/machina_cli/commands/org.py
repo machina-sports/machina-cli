@@ -87,4 +87,21 @@ def use(
 ):
     """Set default organization."""
     set_config("default_organization_id", org_id)
+
+    # Try to resolve org name for display and shell prompt
+    try:
+        client = MachinaClient()
+        result = client.post("user/organizations/search", {
+            "filters": {}, "page": 1, "page_size": 100, "sorters": ["name", 1],
+        })
+        for org in result.get("data", []):
+            if org.get("organization_id") == org_id:
+                name = org.get("organization_name", "")
+                if name:
+                    set_config("default_organization_name", name)
+                console.print(f"Default organization set to [bold]{name or org_id}[/bold]")
+                return
+    except Exception:
+        pass
+
     console.print(f"Default organization set to [bold]{org_id}[/bold]")

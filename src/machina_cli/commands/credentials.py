@@ -48,6 +48,8 @@ def generate(
 @app.command("list")
 def list_keys(
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    show_keys: bool = typer.Option(False, "--show-keys", "-s", help="Show full API keys (not masked)"),
+    copy: Optional[str] = typer.Option(None, "--copy", "-c", help="Copy a key by name (e.g. client-api) to clipboard"),
 ):
     """List API keys for a project."""
     client = MachinaClient()
@@ -71,24 +73,47 @@ def list_keys(
         console.print("[yellow]No API keys found.[/yellow]")
         return
 
+    # --copy mode: find key by name and copy to clipboard
+    if copy:
+        target = next((k for k in keys if k.get("name") == copy), None)
+        if not target:
+            console.print(f"[red]No key named '{copy}' found.[/red]")
+            raise typer.Exit(1)
+        key_value = target.get("key", "")
+        try:
+            import subprocess
+            subprocess.run(["pbcopy"], input=key_value.encode(), check=True)
+            console.print(f"[green]Copied '{copy}' key to clipboard.[/green]")
+        except Exception:
+            # Fallback: just print the key for manual copy
+            console.print(f"\n  {key_value}\n")
+            console.print("[dim]Tip: pipe to clipboard with[/dim] machina credentials list --copy {copy} | pbcopy")
+        return
+
     table = Table(title="API Keys")
+    table.add_column("Name", style="bold")
+    table.add_column("Key")
     table.add_column("ID", style="dim")
-    table.add_column("Name")
-    table.add_column("Key", style="dim")
-    table.add_column("Project", style="dim")
 
     for key in keys:
         key_value = key.get("key", "")
-        # Mask the key, showing only first/last 8 chars
-        masked = f"{key_value[:8]}...{key_value[-8:]}" if len(key_value) > 20 else key_value
+        if show_keys:
+            display_key = key_value
+        else:
+            masked = f"{key_value[:12]}...{key_value[-6:]}" if len(key_value) > 20 else key_value
+            display_key = f"[dim]{masked}[/dim]"
+
         table.add_row(
-            key.get("_id", ""),
             key.get("name", ""),
-            masked,
-            key.get("project_id", ""),
+            display_key,
+            key.get("_id", ""),
         )
 
     console.print(table)
+
+    if not show_keys:
+        console.print()
+        console.print("  [dim]Use[/dim] --show-keys [dim]to reveal full keys, or[/dim] --copy client-api [dim]to copy to clipboard[/dim]")
 
 
 @app.command()
