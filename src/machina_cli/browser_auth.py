@@ -152,12 +152,11 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
     port = _find_free_port()
     callback_url = f"http://localhost:{port}/callback"
 
-    # Build the auth URL
-    params = urlencode({
-        "cli_callback": callback_url,
-        "mode": "cli",
-    })
-    auth_url = f"{session_url}/clerk/sign-in?{params}"
+    # Primary flow: /cli/auth page that works even if user is already logged in.
+    # It calls /api/auth/cli-token (server-side) and redirects to localhost with token.
+    # If user is NOT logged in with Clerk, Clerk middleware will redirect to sign-in first.
+    params = urlencode({"callback": callback_url})
+    auth_url = f"{session_url}/cli/auth?{params}"
 
     # Start local server
     server = HTTPServer(("127.0.0.1", port), _AuthCallbackHandler)
@@ -175,7 +174,7 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
 
         # Wait for callback
         elapsed = 0
-        with console.status("[bold]Waiting for authentication...", spinner="dots"):
+        with console.status("[bold]  Waiting for authentication...", spinner="dots"):
             while elapsed < timeout:
                 if _auth_result:
                     break
@@ -183,13 +182,30 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
                 elapsed += 0.5
 
         if not _auth_result:
-            console.print("[red]Authentication timed out. Please try again.[/red]")
+            console.print()
+            console.print("  [yellow]Browser authentication timed out.[/yellow]")
+            console.print()
+            console.print("  [dim]This can happen if:[/dim]")
+            console.print("  [dim]  • You were already logged in and got redirected to Studio[/dim]")
+            console.print("  [dim]  • The session server doesn't support CLI auth yet[/dim]")
+            console.print()
+            console.print("  [bold]Alternative ways to authenticate:[/bold]")
+            console.print()
+            console.print("  1. Generate an API key in Studio → Settings → API Keys, then:")
+            console.print("     [bold #FF5C1F]machina login --api-key <your-key>[/bold #FF5C1F]")
+            console.print()
+            console.print("  2. Use username/password:")
+            console.print("     [bold #FF5C1F]machina login --with-credentials[/bold #FF5C1F]")
+            console.print()
             return None
 
         if _auth_result.get("status"):
             return _auth_result["token"]
         else:
-            console.print(f"[red]Authentication failed: {_auth_result.get('error', 'Unknown error')}[/red]")
+            error = _auth_result.get('error', 'Unknown error')
+            console.print(f"  [red]Authentication failed: {error}[/red]")
+            console.print()
+            console.print("  [dim]Try:[/dim] [bold]machina login --api-key <key>[/bold] [dim]or[/dim] [bold]machina login --with-credentials[/bold]")
             return None
 
     finally:
