@@ -27,8 +27,8 @@ REPL_COMMANDS = [
 SUB_COMMANDS = {
     "org": ["list", "create", "use"],
     "project": ["list", "create", "use", "status"],
-    "workflow": ["list", "get"],
-    "agent": ["list", "get", "executions"],
+    "workflow": ["list", "get", "run"],
+    "agent": ["list", "get", "run", "executions"],
     "connector": ["list", "get"],
     "mapping": ["list", "get"],
     "prompt": ["list", "get"],
@@ -123,8 +123,8 @@ def _show_help():
             ("auth login|logout|whoami", "Authentication"),
         ]),
         ("Resources", [
-            ("workflow list|get <name>", "Workflows"),
-            ("agent list|get <name>|executions", "Agents"),
+            ("workflow list|get|run <name>", "Workflows"),
+            ("agent list|get|run <name>", "Agents"),
             ("connector list|get <name>", "Connectors"),
             ("mapping list|get <name>", "Mappings"),
             ("prompt list|get <name>", "Prompts"),
@@ -185,7 +185,7 @@ def _dispatch(line: str):
     # This lets users type `workflow list limit 50` instead of `workflow list --limit 50`
     # Only apply AFTER the subcommand (first 2 args are command + subcommand)
     KNOWN_FLAGS = {
-        "limit", "page", "json", "compact",
+        "limit", "page", "json", "compact", "sync", "watch",
         "show-keys", "copy", "repo", "branch", "private", "force",
         "api-key", "with-credentials", "username", "password",
         "slug", "level",

@@ -2,6 +2,14 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.12] - 2026-03-29
+
+### Added
+- **Run agents from CLI**: `machina agent run <name>` — run agents with interactive input prompts or inline `key=value` parameters. Supports `--sync`, `--watch`, and `--json` modes
+- **Run workflows from CLI**: `machina workflow run <name>` — same interactive/inline experience. Sync by default, `--async` and `--watch` available
+- **Interactive input prompts**: when running without parameters, the CLI fetches available inputs from the agent/workflow definition and prompts the user with defaults extracted from the config (e.g. `limit (default: 50):`)
+- **Inline parameters**: pass `key=value` pairs directly for scripting: `machina agent run my-agent season_id=sr:season:123 force=true`
+
 ## [0.2.11] - 2026-03-29
 
 ### Added

@@ -129,7 +129,10 @@ machina workflow list                  # List workflows
 machina workflow list --limit 50       # Paginate
 machina workflow list --json           # Output as JSON
 machina workflow get <name>            # Get workflow details
-machina workflow get <name> --json     # Workflow details as JSON
+machina workflow run <name>            # Run workflow (interactive input prompts)
+machina workflow run <name> key=value  # Run with inline parameters
+machina workflow run <name> --async    # Run async (schedule and return)
+machina workflow run <name> --async --watch  # Run async and watch progress
 ```
 
 ### Agents
@@ -137,8 +140,11 @@ machina workflow get <name> --json     # Workflow details as JSON
 ```bash
 machina agent list                     # List agents
 machina agent list --json              # Output as JSON
-machina agent get <name>               # Get agent details
-machina agent get <name> --json        # Agent details as JSON
+machina agent get <name>               # Get agent details (workflows, context, activity)
+machina agent run <name>               # Run agent (interactive input prompts)
+machina agent run <name> key=value     # Run with inline parameters
+machina agent run <name> --sync        # Run and wait for result
+machina agent run <name> --watch       # Run async and watch progress
 machina agent executions               # List recent executions
 ```
 
@@ -227,6 +233,58 @@ machina config get <key>               # Read a setting
 machina update                         # Update to latest version
 machina update --force                 # Force re-install
 machina version                        # Show current version
+```
+
+## Running Agents & Workflows
+
+The CLI can run agents and workflows directly from the terminal — just like the Studio UI.
+
+### Interactive mode
+
+When you run without parameters, the CLI fetches the available inputs and prompts you:
+
+```
+$ machina workflow run assistant-tools-event-matcher
+
+  Workflow: assistant-tools-event-matcher
+  Tool for matching events to markets
+
+  Available inputs: (press Enter to skip)
+
+  competitionIds:
+  externalSeasonId: sr:season:123
+  limit (default: 50): 10
+  market_id:
+
+  Running workflow: assistant-tools-event-matcher
+  externalSeasonId=sr:season:123
+  limit=10
+
+  Executing workflow...
+```
+
+### Inline mode
+
+Pass parameters directly as `key=value` pairs:
+
+```bash
+machina agent run my-agent season_id=sr:season:123 force=true
+machina workflow run my-workflow limit=10 market_id=abc
+```
+
+### Execution modes
+
+| Flag | Agent default | Workflow default | Behavior |
+|------|--------------|-----------------|----------|
+| (none) | async | sync | Agent schedules, workflow waits |
+| `--sync` | sync | sync | Wait for result |
+| `--async` | async | async | Schedule and return |
+| `--watch` | poll 3s | poll 3s | Watch until complete |
+
+```bash
+machina agent run my-agent --watch              # Run and watch progress
+machina workflow run my-workflow --async --watch # Schedule and watch
+machina agent run my-agent --sync               # Wait for full result
 ```
 
 ## Global Options
