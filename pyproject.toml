@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "machina-cli"
-version = "0.2.5"
+version = "0.2.6"
 description = "CLI for the Machina AI Agent platform"
 readme = "README.md"
 requires-python = ">=3.10"
