@@ -298,7 +298,7 @@ def run_agent(
     if watch and agent_run_id and not sync:
         console.print()
         elapsed = 0
-        with console.status("  Watching execution...") as status_spinner:
+        with console.status("  Watching execution..."):
             while elapsed < 300:
                 time.sleep(3)
                 elapsed += 3
