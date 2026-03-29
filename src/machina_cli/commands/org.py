@@ -39,12 +39,13 @@ def list_orgs():
     table.add_column("Default", justify="center")
 
     for org in orgs:
-        org_id = org.get("_id", "")
-        is_default = "* " if org_id == default_org else ""
+        # API returns user_access_organization records with organization_ prefix
+        org_id = org.get("organization_id", org.get("_id", ""))
+        is_default = "✦" if org_id == default_org else ""
         table.add_row(
             org_id,
-            org.get("name", ""),
-            org.get("slug", ""),
+            org.get("organization_name", org.get("name", "")),
+            org.get("organization_slug", org.get("slug", "")),
             org.get("status", ""),
             is_default,
         )

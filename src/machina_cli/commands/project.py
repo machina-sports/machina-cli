@@ -41,12 +41,13 @@ def list_projects():
     table.add_column("Default", justify="center")
 
     for proj in projects:
-        proj_id = proj.get("_id", "")
-        is_default = "* " if proj_id == default_project else ""
+        # API returns user_access_project records with project_ prefix from lookup
+        proj_id = proj.get("project_id", proj.get("_id", ""))
+        is_default = "✦" if proj_id == default_project else ""
         table.add_row(
             proj_id,
-            proj.get("name", ""),
-            proj.get("slug", ""),
+            proj.get("project_name", proj.get("name", "")),
+            proj.get("project_slug", proj.get("slug", "")),
             proj.get("organization_id", ""),
             proj.get("status", ""),
             is_default,

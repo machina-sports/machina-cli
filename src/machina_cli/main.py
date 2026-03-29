@@ -23,15 +23,25 @@ CMDS = [
 ]
 
 
+def get_version() -> str:
+    """Get version dynamically: importlib.metadata > __version__ fallback."""
+    try:
+        from importlib.metadata import version as pkg_version
+        return pkg_version("machina-cli")
+    except Exception:
+        return __version__
+
+
 def build_wordmark() -> Panel:
     title = Text()
-    title.append("MACHINA\n", style="bold italic #F2EFF3")
+    title.append("MACHINA\n", style="bold italic")
     title.append("✦ ", style="bold #FF5C1F")
-    title.append("SPORTS", style="bold italic #F2EFF3")
+    title.append("SPORTS", style="bold italic")
 
+    ver = get_version()
     version = Text()
-    version.append("machina-sports CLI ", style="bold #E8E5EA")
-    version.append(f"v{__version__}", style="bold #3C96B4")
+    version.append("machina-sports CLI ", style="bold")
+    version.append(f"v{ver}", style="bold #3C96B4")
 
     subtitle = Text("AI Agent Platform", style="dim")
 
@@ -127,7 +137,7 @@ def update(
 @app.command()
 def version():
     """Show CLI version."""
-    console.print(f"machina-cli v{__version__}")
+    console.print(f"machina-cli v{get_version()}")
 
 
 if __name__ == "__main__":
