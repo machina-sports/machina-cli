@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 from machina_cli import __version__
-from machina_cli.commands import auth, org, project, credentials, deploy, config_cmd, workflow, agent, template
+from machina_cli.commands import auth, org, project, credentials, deploy, config_cmd, workflow, agent, template, execution
 from machina_cli.commands.auth import do_login
 
 console = Console()
@@ -103,10 +103,17 @@ app = typer.Typer(
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context):
+def main(
+    ctx: typer.Context,
+    no_interactive: bool = typer.Option(False, "--no-interactive", hidden=True, help="Show banner instead of REPL"),
+):
     """CLI for the Machina AI Agent platform."""
     if not ctx.invoked_subcommand:
-        show_banner()
+        if no_interactive:
+            show_banner()
+        else:
+            from machina_cli.repl import start_repl
+            start_repl()
 
 
 # Register sub-commands
@@ -116,6 +123,7 @@ app.add_typer(project.app, name="project", help="Project management")
 app.add_typer(workflow.app, name="workflow", help="Workflow management")
 app.add_typer(agent.app, name="agent", help="Agent management")
 app.add_typer(template.app, name="template", help="Template management")
+app.add_typer(execution.app, name="execution", help="Execution management")
 app.add_typer(credentials.app, name="credentials", help="API key management")
 app.add_typer(deploy.app, name="deploy", help="Deployment management")
 app.add_typer(config_cmd.app, name="config", help="Configuration management")
