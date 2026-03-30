@@ -175,6 +175,15 @@ def _dispatch(line: str):
         os.system("clear" if os.name != "nt" else "cls")
         return
 
+    # Shortcuts — common commands that users expect to work directly
+    SHORTCUTS = {
+        "logout": ["auth", "logout"],
+        "whoami": ["auth", "whoami"],
+        "login": ["auth", "login"],
+    }
+    if cmd in SHORTCUTS:
+        args = SHORTCUTS[cmd] + args[1:]
+
     # Strip "machina" prefix if user types it out of habit
     if cmd == "machina":
         args = args[1:]
