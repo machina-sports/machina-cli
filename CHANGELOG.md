@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.14] - 2026-03-30
+
+### Fixed
+- **Browser login**: fixed 500 error on `/api/auth/cli-token` — now correctly handles backend 303 redirect and extracts session token from `Set-Cookie` headers
+- **REPL shortcuts**: `logout`, `login`, `whoami` now work directly in the REPL without the `auth` prefix
+
 ## [0.2.13] - 2026-03-29
 
 ### Added
