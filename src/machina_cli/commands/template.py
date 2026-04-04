@@ -1,5 +1,7 @@
 """Template management commands."""
 
+import os
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -106,3 +108,88 @@ def list_templates(
 
     console.print(tree)
     console.print(f"\n  [dim]{len(paths)} directories, {len(top_level)} categories[/dim]")
+import os
+from pathlib import Path
+
+@app.command("install")
+def install_template(
+    template_name: str = typer.Argument(..., help="Name of the template/skill to install"),
+    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
+    branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
+):
+    """Install a premium agent template or skill payload into the local workspace."""
+    client = ProjectClient(project_id)
+    
+    with console.status(f"[bold green]Fetching '{template_name}' payload from Machina Registry..."):
+        # Hit the skills/install endpoint
+        # For agent-first design, this endpoint would handle the 402 micro-transaction block.
+        result = client.post("skills/install", {
+            "template": template_name,
+            "repo_url": repo,
+            "branch": branch
+        })
+        
+    response_data = result.get("data", result)
+        
+    # Check for payment required (HTTP 402 flow mapping)
+    if response_data.get("accessRequirements", {}).get("payment", {}).get("statusCode") == 402:
+        amount = response_data["accessRequirements"]["payment"]["amountUSD"]
+        url = response_data.get("paymentUrl", f"https://billing.machina.gg/pay?template={template_name}")
+        console.print(f"[bold red]HTTP 402 Payment Required[/bold red]")
+        console.print(f"Template '{template_name}' requires a micro-transaction of ${amount:.2f} USD.")
+        console.print(f"Please complete the payment here to unlock the payload:")
+        console.print(f"[link={url}]{url}[/link]")
+        console.print("\n[yellow]Agent Action:[/yellow] Present this link to the human, wait for confirmation of payment, then re-run the `machina templates install` command.")
+        raise typer.Exit(1)
+        
+    # Process the JSON payload installation
+    files = response_data.get("files", [])
+    if not files:
+        console.print(f"[red]Error: Invalid skill payload received for '{template_name}'. No files found.[/red]")
+        raise typer.Exit(1)
+        
+    console.print(f"\n[bold blue]Installing Skill: {response_data.get('title', template_name)}[/bold blue]")
+    console.print(f"{response_data.get('summary', '')}\n")
+    
+    # Run preflight checks if any
+    preflight = response_data.get("preflightChecks", [])
+    if preflight:
+        console.print("[bold]Running Preflight Checks...[/bold]")
+        for check in preflight:
+            name = check.get("name", "Check")
+            command = check.get("check", "")
+            console.print(f" - {name}...")
+            # Execute safely
+            ret = os.system(command)
+            if ret != 0 and check.get("required"):
+                console.print(f"[bold red]Preflight check '{name}' failed. Installation aborted.[/bold red]")
+                raise typer.Exit(1)
+                
+    # Write files to disk
+    console.print("\n[bold]Writing Agent Toolkit...[/bold]")
+    for file_obj in files:
+        file_path = file_obj.get("path")
+        content = file_obj.get("content", "")
+        mode = file_obj.get("writeMode", "create")
+        
+        target_path = Path.cwd() / file_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if mode == "append" and target_path.exists():
+            with open(target_path, "a") as f:
+                f.write("\n" + content)
+            console.print(f" [green]Appended[/green] {file_path}")
+        else:
+            with open(target_path, "w") as f:
+                f.write(content)
+            console.print(f" [green]Created[/green] {file_path}")
+            
+    # Print next steps
+    next_steps = response_data.get("nextSteps", [])
+    if next_steps:
+        console.print("\n[bold yellow]Next Steps for the Agent:[/bold yellow]")
+        for i, step in enumerate(next_steps, 1):
+            console.print(f"{i}. {step}")
+            
+    console.print(f"\n[bold green]Successfully installed {template_name}![/bold green]")
