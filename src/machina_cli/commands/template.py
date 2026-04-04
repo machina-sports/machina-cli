@@ -211,13 +211,13 @@ def install_template(
         console.print("  </agent_instruction>")
         console.print("</machina_install_result>")
 
-@app.command("deploy")
-def deploy_template(
+@app.command("push")
+def push_template(
     target_dir: str = typer.Argument(..., help="Path to local folder containing your custom template (e.g. ./my-agent)"),
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
-    """Deploy a custom template from local workspace to the Machina Pod."""
+    """Push a custom template from local workspace to the Machina Pod."""
     import shutil
     import tempfile
     import json
