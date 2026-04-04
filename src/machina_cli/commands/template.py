@@ -210,3 +210,56 @@ def install_template(
         console.print(f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources.")
         console.print("  </agent_instruction>")
         console.print("</machina_install_result>")
+
+@app.command("deploy")
+def deploy_template(
+    target_dir: str = typer.Argument(..., help="Path to local folder containing your custom template (e.g. ./my-agent)"),
+    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
+):
+    """Deploy a custom template from local workspace to the Machina Pod."""
+    import shutil
+    import tempfile
+    import json
+    from pathlib import Path
+    
+    client = ProjectClient(project_id)
+    target_path = Path(target_dir).resolve()
+    
+    if not target_path.exists() or not target_path.is_dir():
+        if json_output:
+            console.print_json(json.dumps({"status": "error", "message": f"Directory not found: {target_dir}"}))
+        else:
+            console.print(f"[red]Directory not found: {target_dir}[/red]")
+        raise typer.Exit(1)
+        
+    if not json_output:
+        console.print(f"[bold green]Zipping {target_path.name} for deployment...[/bold green]")
+        
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        zip_path = Path(tmpdirname) / target_path.name
+        # Create a zip archive of the directory
+        shutil.make_archive(str(zip_path), 'zip', target_path)
+        zip_file = f"{zip_path}.zip"
+        
+        if not json_output:
+            console.print(f"[bold green]Deploying to Machina Cloud Pod...[/bold green]")
+            
+        result = client.post_file("templates/upload", zip_file) # Adjusted to backend POST /templates/upload endpoint
+        
+    if isinstance(result, dict) and result.get("status") == False:
+        error_msg = result.get('error', 'Unknown error')
+        if json_output:
+            console.print_json(json.dumps({"status": "error", "message": error_msg}))
+        else:
+            console.print(f"[red]Deployment failed:[/red] {error_msg}")
+        raise typer.Exit(1)
+        
+    if json_output:
+        console.print_json(json.dumps({
+            "status": "success",
+            "message": f"Successfully deployed custom template {target_path.name} to the cloud."
+        }))
+    else:
+        console.print(f"\n[bold blue]Successfully deployed '{target_path.name}' to the Machina Cloud Pod![/bold blue]")
+        console.print("Your custom workflows and datasets are now live.")
