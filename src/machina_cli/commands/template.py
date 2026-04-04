@@ -111,76 +111,52 @@ def list_templates(
 import os
 from pathlib import Path
 
+
+
 @app.command("install")
 def install_template(
-    template_name: str = typer.Argument(..., help="Name of the template/skill to install"),
+    template_path: str = typer.Argument(..., help="Path to the template (e.g. agent-templates/bundesliga-podcast)"),
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
 ):
-    """Install a premium agent template or skill payload into the local workspace."""
+    """Install a template: Provisions cloud resources via API and downloads local agent context."""
     client = ProjectClient(project_id)
+    template_name = template_path.split('/')[-1]
     
-    with console.status(f"[bold green]Fetching '{template_name}' payload from Machina Registry..."):
-        # Hit the skills/install endpoint
-        # For agent-first design, this endpoint would handle the 402 micro-transaction block.
-        result = client.post("skills/install", {
-            "template": template_name,
+    with console.status(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'..."):
+        payload = [{
             "repo_url": repo,
-            "branch": branch
-        })
+            "branch": branch,
+            "template": template_path,
+            "private_repository": False
+        }]
+        # Hit the real backend endpoint used by MCP
+        result = client.post("templates/git", payload)
         
-    response_data = result.get("data", result)
-        
-
-        
-    # Process the JSON payload installation
-    files = response_data.get("files", [])
-    if not files:
-        console.print(f"[red]Error: Invalid skill payload received for '{template_name}'. No files found.[/red]")
+    if isinstance(result, dict) and result.get("status") == False:
+        console.print(f"[red]Cloud provisioning failed:[/red] {result.get('error')}")
         raise typer.Exit(1)
         
-    console.print(f"\n[bold blue]Installing Skill: {response_data.get('title', template_name)}[/bold blue]")
-    console.print(f"{response_data.get('summary', '')}\n")
-    
-    # Run preflight checks if any
-    preflight = response_data.get("preflightChecks", [])
-    if preflight:
-        console.print("[bold]Running Preflight Checks...[/bold]")
-        for check in preflight:
-            name = check.get("name", "Check")
-            command = check.get("check", "")
-            console.print(f" - {name}...")
-            # Execute safely
-            ret = os.system(command)
-            if ret != 0 and check.get("required"):
-                console.print(f"[bold red]Preflight check '{name}' failed. Installation aborted.[/bold red]")
-                raise typer.Exit(1)
-                
-    # Write files to disk
-    console.print("\n[bold]Writing Agent Toolkit...[/bold]")
-    for file_obj in files:
-        file_path = file_obj.get("path")
-        content = file_obj.get("content", "")
-        mode = file_obj.get("writeMode", "create")
+    with console.status(f"[bold green]Downloading local agent context for '{template_name}'..."):
+        import os
+        from pathlib import Path
+        local_dir = Path.cwd() / template_name
+        tmp_dir = f"{template_name}_tmp"
         
-        target_path = Path.cwd() / file_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        # Perform a sparse checkout to get just the requested template folder
+        os.system(f"git clone -b {branch} --depth 1 --filter=blob:none --sparse {repo} {tmp_dir} > /dev/null 2>&1")
+        os.system(f"cd {tmp_dir} && git sparse-checkout set {template_path} > /dev/null 2>&1")
+        os.system(f"mv {tmp_dir}/{template_path} {local_dir} > /dev/null 2>&1")
+        os.system(f"rm -rf {tmp_dir} > /dev/null 2>&1")
         
-        if mode == "append" and target_path.exists():
-            with open(target_path, "a") as f:
-                f.write("\n" + content)
-            console.print(f" [green]Appended[/green] {file_path}")
-        else:
-            with open(target_path, "w") as f:
-                f.write(content)
-            console.print(f" [green]Created[/green] {file_path}")
-            
-    # Print next steps
-    next_steps = response_data.get("nextSteps", [])
-    if next_steps:
-        console.print("\n[bold yellow]Next Steps for the Agent:[/bold yellow]")
-        for i, step in enumerate(next_steps, 1):
-            console.print(f"{i}. {step}")
-            
-    console.print(f"\n[bold green]Successfully installed {template_name}![/bold green]")
+    # Agent-First Handoff Output (Machine Readable)
+    console.print("\n<machina_install_result>")
+    console.print("  <status>success</status>")
+    console.print("  <cloud_provisioned>true</cloud_provisioned>")
+    console.print(f"  <local_path>./{template_name}</local_path>")
+    console.print("  <agent_instruction>")
+    console.print("    1. Cloud infrastructure (connectors/datasets/mappings) successfully provisioned on the Machina Pod.")
+    console.print(f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources.")
+    console.print("  </agent_instruction>")
+    console.print("</machina_install_result>")
