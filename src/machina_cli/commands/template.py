@@ -132,16 +132,7 @@ def install_template(
         
     response_data = result.get("data", result)
         
-    # Check for payment required (HTTP 402 flow mapping)
-    if response_data.get("accessRequirements", {}).get("payment", {}).get("statusCode") == 402:
-        amount = response_data["accessRequirements"]["payment"]["amountUSD"]
-        url = response_data.get("paymentUrl", f"https://billing.machina.gg/pay?template={template_name}")
-        console.print(f"[bold red]HTTP 402 Payment Required[/bold red]")
-        console.print(f"Template '{template_name}' requires a micro-transaction of ${amount:.2f} USD.")
-        console.print(f"Please complete the payment here to unlock the payload:")
-        console.print(f"[link={url}]{url}[/link]")
-        console.print("\n[yellow]Agent Action:[/yellow] Present this link to the human, wait for confirmation of payment, then re-run the `machina templates install` command.")
-        raise typer.Exit(1)
+
         
     # Process the JSON payload installation
     files = response_data.get("files", [])
