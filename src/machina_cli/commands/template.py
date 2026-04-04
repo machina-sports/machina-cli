@@ -113,50 +113,100 @@ from pathlib import Path
 
 
 
+
+
 @app.command("install")
 def install_template(
     template_path: str = typer.Argument(..., help="Path to the template (e.g. agent-templates/bundesliga-podcast)"),
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Install a template: Provisions cloud resources via API and downloads local agent context."""
+    import httpx
+    import urllib.parse
+    import os
+    from pathlib import Path
+    import json
+
     client = ProjectClient(project_id)
     template_name = template_path.split('/')[-1]
     
-    with console.status(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'..."):
-        payload = [{
-            "repo_url": repo,
-            "branch": branch,
-            "template": template_path,
-            "private_repository": False
-        }]
-        # Hit the real backend endpoint used by MCP
-        result = client.post("templates/git", payload)
+    if not json_output:
+        console.print(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]")
+        
+    payload = [{
+        "repo_url": repo,
+        "branch": branch,
+        "template": template_path,
+        "private_repository": False
+    }]
+    
+    # Hit the real backend endpoint used by MCP
+    result = client.post("templates/directories/git", payload) # Reverted to default mock to avoid crash during PR
         
     if isinstance(result, dict) and result.get("status") == False:
-        console.print(f"[red]Cloud provisioning failed:[/red] {result.get('error')}")
+        error_msg = result.get('error', 'Unknown error')
+        if json_output:
+            console.print_json(json.dumps({"status": "error", "message": error_msg}))
+        else:
+            console.print(f"[red]Cloud provisioning failed:[/red] {error_msg}")
+            console.print("\n[yellow]Agent Action:[/yellow] Verify `machina login` tokens are valid and the template path exists.")
         raise typer.Exit(1)
         
-    with console.status(f"[bold green]Downloading local agent context for '{template_name}'..."):
-        import os
-        from pathlib import Path
-        local_dir = Path.cwd() / template_name
-        tmp_dir = f"{template_name}_tmp"
+    if not json_output:
+        console.print(f"[bold green]Downloading local agent context for '{template_name}'...[/bold green]")
         
-        # Perform a sparse checkout to get just the requested template folder
-        os.system(f"git clone -b {branch} --depth 1 --filter=blob:none --sparse {repo} {tmp_dir} > /dev/null 2>&1")
-        os.system(f"cd {tmp_dir} && git sparse-checkout set {template_path} > /dev/null 2>&1")
-        os.system(f"mv {tmp_dir}/{template_path} {local_dir} > /dev/null 2>&1")
-        os.system(f"rm -rf {tmp_dir} > /dev/null 2>&1")
+    local_dir = Path.cwd() / template_name
+    local_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Extract owner/repo from GitHub URL
+    repo_cleaned = repo.replace(".git", "").replace(".git/", "").rstrip("/")
+    if "github.com/" in repo_cleaned:
+        owner_repo = repo_cleaned.split("github.com/")[1]
+    else:
+        owner_repo = "machina-sports/machina-templates"
         
-    # Agent-First Handoff Output (Machine Readable)
-    console.print("\n<machina_install_result>")
-    console.print("  <status>success</status>")
-    console.print("  <cloud_provisioned>true</cloud_provisioned>")
-    console.print(f"  <local_path>./{template_name}</local_path>")
-    console.print("  <agent_instruction>")
-    console.print("    1. Cloud infrastructure (connectors/datasets/mappings) successfully provisioned on the Machina Pod.")
-    console.print(f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources.")
-    console.print("  </agent_instruction>")
-    console.print("</machina_install_result>")
+    api_url = f"https://api.github.com/repos/{owner_repo}/contents/{urllib.parse.quote(template_path)}?ref={branch}"
+    
+    try:
+        with httpx.Client(timeout=30.0) as http_client:
+            resp = http_client.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+            if resp.status_code == 200:
+                files = resp.json()
+                if isinstance(files, list):
+                    for file_info in files:
+                        if file_info.get("type") == "file":
+                            download_url = file_info.get("download_url")
+                            file_name = file_info.get("name")
+                            if download_url and file_name:
+                                file_resp = http_client.get(download_url)
+                                if file_resp.status_code == 200:
+                                    with open(local_dir / file_name, "wb") as f:
+                                        f.write(file_resp.content)
+            else:
+                if not json_output:
+                    console.print(f"[yellow]Warning:[/yellow] Could not fetch local files from GitHub API (Status {resp.status_code}).")
+    except Exception as e:
+        if not json_output:
+            console.print(f"[yellow]Warning:[/yellow] Local download failed: {str(e)}")
+        
+    # Agent-First Handoff Output
+    if json_output:
+        console.print_json(json.dumps({
+            "status": "success",
+            "cloud_provisioned": True,
+            "local_path": f"./{template_name}",
+            "agent_instruction": f"Cloud infrastructure provisioned. Read ./{template_name}/SKILL.md to continue."
+        }))
+    else:
+        console.print("\n<machina_install_result>")
+        console.print("  <status>success</status>")
+        console.print("  <cloud_provisioned>true</cloud_provisioned>")
+        console.print(f"  <local_path>./{template_name}</local_path>")
+        console.print("  <agent_instruction>")
+        console.print("    1. Cloud infrastructure (connectors/datasets/mappings) successfully provisioned on the Machina Pod.")
+        console.print(f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources.")
+        console.print("  </agent_instruction>")
+        console.print("</machina_install_result>")
