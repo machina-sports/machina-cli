@@ -110,8 +110,6 @@ def list_templates(
 
 
 
-
-
 @app.command("install")
 def install_template(
     template_path: str = typer.Argument(..., help="Path to the template (e.g. agent-templates/bundesliga-podcast)"),
@@ -138,16 +136,17 @@ def install_template(
         "private_repository": False
     }]
     
-    # Hit the real backend endpoint used by MCP
-    result = client.post("templates/directories/git", payload) # Reverted to default mock to avoid crash during PR
-        
-    if isinstance(result, dict) and not result.get("status"):
-        error_msg = result.get('error', 'Unknown error')
+    result = client.post("templates/directories/git", payload)
+
+    if isinstance(result, dict) and result.get("status") == "error":
+        error_msg = result.get('error', {})
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get('message', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
             console.print(f"[red]Cloud provisioning failed:[/red] {error_msg}")
-            console.print("\n[yellow]Agent Action:[/yellow] Verify `machina login` tokens are valid and the template path exists.")
+            console.print("\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]")
         raise typer.Exit(1)
         
     if not json_output:
@@ -256,7 +255,6 @@ def push_template(
         except Exception as e:
             error_msg = f"Malformed _install.yml: {str(e)}"
             if json_output:
-                import json
                 console.print_json(json.dumps({"status": "error", "message": error_msg, "agent_instruction": "Fix the _install.yml syntax using the mkn-constructor schema and retry push."}))
             else:
                 console.print(f"[bold red]Pre-Flight Linter Failed![/bold red] {error_msg}")
@@ -278,10 +276,12 @@ def push_template(
         if not json_output:
             console.print("[bold green]Deploying to Machina Cloud Pod...[/bold green]")
             
-        result = client.post_file("templates/upload", zip_file) # Adjusted to backend POST /templates/upload endpoint
-        
-    if isinstance(result, dict) and not result.get("status"):
-        error_msg = result.get('error', 'Unknown error')
+        result = client.post_file("templates/upload", zip_file)
+
+    if isinstance(result, dict) and result.get("status") == "error":
+        error_msg = result.get('error', {})
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get('message', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:

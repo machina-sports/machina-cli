@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.18] - 2026-04-05
+
+### Fixed
+- **Template install/push**: fix false-positive error checks that could treat successful responses as failures (status check now only triggers on explicit `"error"` status)
+- **Template cleanup**: remove duplicate imports, dead comments, and extra blank lines from template.py
+
 ## [0.2.17] - 2026-04-05
 
 ### Fixed
