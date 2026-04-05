@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.21] - 2026-04-05
+
+### Fixed
+- **Template install**: use correct endpoint `templates/git` (was `templates/directories/git`) and field name `repo_branch` (was `branch`), matching the Studio implementation
+
 ## [0.2.20] - 2026-04-05
 
 ### Fixed

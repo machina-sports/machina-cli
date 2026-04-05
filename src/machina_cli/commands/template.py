@@ -128,15 +128,15 @@ def install_template(
     
     if not json_output:
         console.print(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]")
-        
+
     payload = [{
         "repo_url": repo,
-        "branch": branch,
+        "repo_branch": branch,
         "template": template_path,
-        "private_repository": False
+        "private_repository": False,
     }]
-    
-    result = client.post("templates/directories/git", payload)
+
+    result = client.post("templates/git", payload)
 
     if isinstance(result, dict) and result.get("status") == "error":
         error_msg = result.get('error', {})
