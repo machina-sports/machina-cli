@@ -1,3 +1,4 @@
+import os
 """HTTP client for Machina Client API (per-project resources).
 
 The Client API serves project-level resources (workflows, agents, templates, etc.)
@@ -168,6 +169,23 @@ class ProjectClient:
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
                 response = client.post(url, headers=self._headers(), json=json_data or {})
+                return self._handle_response(response)
+        except httpx.ConnectError:
+            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            raise SystemExit(1)
+
+    def post_file(self, path: str, file_path: str, data: dict = None) -> dict:
+        url = f"{self.api_url}/{path.lstrip('/')}"
+        import mimetypes
+        import os
+        mime_type, _ = mimetypes.guess_type(file_path)
+        mime_type = mime_type or 'application/octet-stream'
+        
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                with open(file_path, "rb") as f:
+                    files = {"file": (os.path.basename(file_path), f, mime_type)}
+                    response = client.post(url, headers=self._headers(), data=data, files=files)
                 return self._handle_response(response)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
