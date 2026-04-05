@@ -16,24 +16,49 @@ CONSTRUCTOR_SKILL_PATH = "skills/mkn-constructor"
 CONSTRUCTOR_LOCAL_DIR = "mkn-constructor"
 
 
+def _download_template_files(template_path: str, repo: str, branch: str):
+    """Download local package files from GitHub without requiring project context."""
+    import httpx
+    import urllib.parse
+
+    target_dir = Path.cwd() / Path(template_path).name
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    repo_cleaned = repo.replace(".git", "").replace(".git/", "").rstrip("/")
+    if "github.com/" in repo_cleaned:
+        owner_repo = repo_cleaned.split("github.com/")[1]
+    else:
+        owner_repo = "machina-sports/machina-templates"
+
+    api_url = f"https://api.github.com/repos/{owner_repo}/contents/{urllib.parse.quote(template_path)}?ref={branch}"
+
+    with httpx.Client(timeout=30.0) as http_client:
+        resp = http_client.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+        resp.raise_for_status()
+        files = resp.json()
+        if isinstance(files, list):
+            for file_info in files:
+                if file_info.get("type") == "file":
+                    download_url = file_info.get("download_url")
+                    file_name = file_info.get("name")
+                    if download_url and file_name:
+                        file_resp = http_client.get(download_url)
+                        file_resp.raise_for_status()
+                        with open(target_dir / file_name, "wb") as f:
+                            f.write(file_resp.content)
+
+
 def _ensure_constructor_installed(
-    project_id: Optional[str] = None,
     repo: str = template.DEFAULT_REPO,
     branch: str = template.DEFAULT_BRANCH,
 ):
-    """Best-effort bootstrap of mkn-constructor into the current workspace."""
+    """Best-effort local bootstrap of mkn-constructor into the current workspace."""
     local_dir = Path.cwd() / CONSTRUCTOR_LOCAL_DIR
     if local_dir.exists():
         return
 
-    console.print(f"[dim]Bootstrapping constructor skill:[/dim] {CONSTRUCTOR_SKILL_PATH}")
-    template.install_template(
-        template_path=CONSTRUCTOR_SKILL_PATH,
-        project_id=project_id,
-        repo=repo,
-        branch=branch,
-        json_output=False,
-    )
+    console.print(f"[dim]Bootstrapping constructor skill locally:[/dim] {CONSTRUCTOR_SKILL_PATH}")
+    _download_template_files(CONSTRUCTOR_SKILL_PATH, repo=repo, branch=branch)
 
 
 @app.command("list")
@@ -45,7 +70,7 @@ def list_skills(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List available skills from the template repository."""
-    _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
+    _ensure_constructor_installed(repo=repo, branch=branch)
     return template.list_templates(
         project_id=project_id,
         repo=repo,
@@ -64,7 +89,7 @@ def install_skill(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Install a skill/package from the registry."""
-    _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
+    _ensure_constructor_installed(repo=repo, branch=branch)
     return template.install_template(
         template_path=skill_path,
         project_id=project_id,
@@ -81,7 +106,7 @@ def push_skill(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Push a local skill/package to the Machina pod."""
-    _ensure_constructor_installed(project_id=project_id)
+    _ensure_constructor_installed()
     return template.push_template(
         target_dir=target_dir,
         project_id=project_id,
@@ -126,7 +151,7 @@ def constructor_bridge(
 ):
     """Use mkn-constructor as the built-in authoring bridge for new skills/templates/connectors."""
     if install:
-        _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
+        _ensure_constructor_installed(repo=repo, branch=branch)
 
     console.print(Panel.fit(
         f"[bold]Constructor skill:[/bold] {CONSTRUCTOR_SKILL_PATH}\n"
