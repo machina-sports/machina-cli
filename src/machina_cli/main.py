@@ -41,12 +41,8 @@ CMD_GROUPS = [
 
 
 def get_version() -> str:
-    """Get version dynamically: importlib.metadata > __version__ fallback."""
-    try:
-        from importlib.metadata import version as pkg_version
-        return pkg_version("machina-cli")
-    except Exception:
-        return __version__
+    """Get version from __version__ (works in both pip and PyInstaller builds)."""
+    return __version__
 
 
 def build_wordmark() -> Panel:
@@ -182,9 +178,15 @@ def shell_prompt():
 def login(
     api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key"),
     with_credentials: bool = typer.Option(False, "--with-credentials", help="Use username/password instead of browser"),
+    no_interactive: bool = typer.Option(False, "--no-interactive", hidden=True, help="Don't start REPL after login"),
 ):
     """Login to the Machina platform. Opens browser by default."""
     do_login(api_key=api_key, with_credentials=with_credentials)
+
+    # After successful login, start the REPL so the user lands inside the CLI
+    if not no_interactive:
+        from machina_cli.repl import start_repl
+        start_repl()
 
 
 @app.command()

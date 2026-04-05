@@ -2,6 +2,13 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.20] - 2026-04-05
+
+### Fixed
+- **`machina version`**: now reports the correct version from `__version__` instead of stale pip metadata
+- **API key auto-fallback**: when an API key returns 500 (e.g. missing from Redis), the CLI automatically clears it and retries with the session token if available
+- **Login enters REPL**: `machina login` now starts the interactive REPL after successful authentication instead of exiting
+
 ## [0.2.19] - 2026-04-05
 
 ### Fixed

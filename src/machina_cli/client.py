@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 from rich.console import Console
 
-from machina_cli.config import get_api_url, resolve_auth_token
+from machina_cli.config import _clear_credential, get_api_url, get_credential, resolve_auth_token
 
 console = Console(stderr=True)
 
@@ -65,33 +65,37 @@ class MachinaClient:
 
         return data
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        """Execute request with automatic API key fallback on 500."""
         url = f"{self.api_url}/{path.lstrip('/')}"
-        try:
-            with httpx.Client(timeout=TIMEOUT) as client:
-                response = client.get(url, headers=self._headers(), params=params)
-                return self._handle_response(response)
-        except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]")
-            raise SystemExit(1)
-
-    def post(self, path: str, json_data: Optional[dict] = None, skip_auth: bool = False) -> dict:
-        url = f"{self.api_url}/{path.lstrip('/')}"
+        skip_auth = kwargs.pop("skip_auth", False)
         headers = {"Content-Type": "application/json"} if skip_auth else self._headers()
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
-                response = client.post(url, headers=headers, json=json_data or {})
+                response = getattr(client, method)(url, headers=headers, **kwargs)
+
+                # If API key returns 500, it may be invalid/missing from Redis.
+                # Clear it and retry with session token if available.
+                if response.status_code >= 500 and headers.get("X-Api-Token"):
+                    if get_credential("session_token"):
+                        console.print(
+                            "[yellow]API key rejected by server. "
+                            "Falling back to session token...[/yellow]"
+                        )
+                        _clear_credential("api_key")
+                        headers = self._headers()
+                        response = getattr(client, method)(url, headers=headers, **kwargs)
+
                 return self._handle_response(response)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]")
             raise SystemExit(1)
 
+    def get(self, path: str, params: Optional[dict] = None) -> dict:
+        return self._request("get", path, params=params)
+
+    def post(self, path: str, json_data: Optional[dict] = None, skip_auth: bool = False) -> dict:
+        return self._request("post", path, json=json_data or {}, skip_auth=skip_auth)
+
     def delete(self, path: str) -> dict:
-        url = f"{self.api_url}/{path.lstrip('/')}"
-        try:
-            with httpx.Client(timeout=TIMEOUT) as client:
-                response = client.delete(url, headers=self._headers())
-                return self._handle_response(response)
-        except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]")
-            raise SystemExit(1)
+        return self._request("delete", path)
