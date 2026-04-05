@@ -1,6 +1,5 @@
 """Template management commands."""
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -108,8 +107,6 @@ def list_templates(
 
     console.print(tree)
     console.print(f"\n  [dim]{len(paths)} directories, {len(top_level)} categories[/dim]")
-import os
-from pathlib import Path
 
 
 
@@ -126,8 +123,6 @@ def install_template(
     """Install a template: Provisions cloud resources via API and downloads local agent context."""
     import httpx
     import urllib.parse
-    import os
-    from pathlib import Path
     import json
 
     client = ProjectClient(project_id)
@@ -146,7 +141,7 @@ def install_template(
     # Hit the real backend endpoint used by MCP
     result = client.post("templates/directories/git", payload) # Reverted to default mock to avoid crash during PR
         
-    if isinstance(result, dict) and result.get("status") == False:
+    if isinstance(result, dict) and not result.get("status"):
         error_msg = result.get('error', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
@@ -221,7 +216,6 @@ def push_template(
     import shutil
     import tempfile
     import json
-    from pathlib import Path
     
     client = ProjectClient(project_id)
     target_path = Path(target_dir).resolve()
@@ -282,11 +276,11 @@ def push_template(
         zip_file = f"{zip_path}.zip"
         
         if not json_output:
-            console.print(f"[bold green]Deploying to Machina Cloud Pod...[/bold green]")
+            console.print("[bold green]Deploying to Machina Cloud Pod...[/bold green]")
             
         result = client.post_file("templates/upload", zip_file) # Adjusted to backend POST /templates/upload endpoint
         
-    if isinstance(result, dict) and result.get("status") == False:
+    if isinstance(result, dict) and not result.get("status"):
         error_msg = result.get('error', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
