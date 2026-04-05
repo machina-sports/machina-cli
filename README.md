@@ -4,6 +4,8 @@ The official command-line interface for the [Machina Sports](https://machina.gg)
 
 Manage organizations, projects, workflows, agents, skills, and templates directly from your terminal.
 
+The CLI is intentionally a thin shell. The built-in authoring bridge for creating new skills/templates/connectors is `mkn-constructor` from `machina-templates`.
+
 ## Install
 
 ### macOS / Linux
@@ -200,6 +202,7 @@ machina skills install <path>          # Install a skill/package
 machina skills info <path>             # Show expected skill manifest files
 machina skills run <name>              # Skills-first run surface (bridge placeholder)
 machina skills push <path>             # Push a local skill/package
+machina skills constructor             # Install and use mkn-constructor as the authoring bridge
 ```
 
 ### Templates (compatibility surface)

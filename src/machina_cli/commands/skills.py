@@ -5,11 +5,14 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
 from machina_cli.commands import template
 
 app = typer.Typer(help="Skills management")
 console = Console()
+
+CONSTRUCTOR_SKILL_PATH = "skills/mkn-constructor"
 
 
 @app.command("list")
@@ -86,3 +89,30 @@ def run_skill(
     console.print(f"[bold]Skill:[/bold] {skill_name}")
     console.print("[yellow]Direct skill runtime dispatch is not formalized in machina-cli yet.[/yellow]")
     console.print("[dim]For now, install the package and follow the skill's SKILL.md or use the Studio Skills run surface.[/dim]")
+
+
+@app.command("constructor")
+def constructor_bridge(
+    install: bool = typer.Option(True, "--install/--no-install", help="Install the constructor skill package first"),
+    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    repo: str = typer.Option(template.DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
+    branch: str = typer.Option(template.DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
+):
+    """Use mkn-constructor as the built-in authoring bridge for new skills/templates/connectors."""
+    if install:
+        console.print(f"[bold green]Installing constructor skill:[/bold green] {CONSTRUCTOR_SKILL_PATH}")
+        template.install_template(
+            template_path=CONSTRUCTOR_SKILL_PATH,
+            project_id=project_id,
+            repo=repo,
+            branch=branch,
+            json_output=False,
+        )
+
+    console.print(Panel.fit(
+        f"[bold]Constructor skill:[/bold] {CONSTRUCTOR_SKILL_PATH}\n"
+        "[bold]Purpose:[/bold] Build new skills, templates, and connectors in the canonical Machina format\n"
+        "[bold]Next action:[/bold] Read the installed SKILL.md and use the init/create/validate/install references as the authoring workflow",
+        title="mkn-constructor bridge",
+        border_style="#FF5C1F",
+    ))

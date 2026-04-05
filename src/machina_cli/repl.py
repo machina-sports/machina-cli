@@ -33,7 +33,7 @@ SUB_COMMANDS = {
     "mapping": ["list", "get"],
     "prompt": ["list", "get"],
     "document": ["list", "get"],
-    "skills": ["list", "install", "info", "run", "push"],
+    "skills": ["list", "install", "info", "run", "push", "constructor"],
     "template": ["list", "install", "push"],
     "execution": ["get", "list"],
     "credentials": ["list", "generate", "revoke"],
@@ -133,7 +133,7 @@ def _show_help():
         ]),
         ("Operations", [
             ("execution list|get <id>", "Execution history"),
-            ("skills list|install|info|run|push", "Skills-first surface"),
+            ("skills list|install|info|run|push|constructor", "Skills-first surface"),
             ("template list|install|push", "Template compatibility surface"),
             ("deploy start|status|restart", "Deployments"),
             ("config list|set|get", "Configuration"),
