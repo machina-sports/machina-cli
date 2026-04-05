@@ -233,6 +233,45 @@ def push_template(
             console.print(f"[red]Directory not found: {target_dir}[/red]")
         raise typer.Exit(1)
         
+
+    # PRE-FLIGHT LINTER: Validate _install.yml
+    install_yaml_path = target_path / "_install.yml"
+    if install_yaml_path.exists():
+        if not json_output:
+            console.print("[bold yellow]Running pre-flight YAML linter on _install.yml...[/bold yellow]")
+        import yaml
+        try:
+            with open(install_yaml_path, 'r') as yf:
+                manifest = yaml.safe_load(yf)
+                
+            if not isinstance(manifest, dict):
+                raise ValueError("_install.yml must be a valid YAML dictionary.")
+                
+            if "setup" not in manifest:
+                raise ValueError("Missing required root key: 'setup'")
+                
+            setup_block = manifest.get("setup", {})
+            required_setup_keys = ["title", "description", "value", "version"]
+            for key in required_setup_keys:
+                if key not in setup_block:
+                    raise ValueError(f"Missing required key in setup block: '{key}'")
+                    
+            if "datasets" not in manifest:
+                raise ValueError("Missing required root key: 'datasets'")
+                
+        except Exception as e:
+            error_msg = f"Malformed _install.yml: {str(e)}"
+            if json_output:
+                import json
+                console.print_json(json.dumps({"status": "error", "message": error_msg, "agent_instruction": "Fix the _install.yml syntax using the mkn-constructor schema and retry push."}))
+            else:
+                console.print(f"[bold red]Pre-Flight Linter Failed![/bold red] {error_msg}")
+                console.print("\n[yellow]Agent Action:[/yellow] Review your YAML syntax. Ensure 'setup' and 'datasets' are present. Refer to mkn-constructor schemas.")
+            raise typer.Exit(1)
+    else:
+        if not json_output:
+            console.print("[yellow]Warning: No _install.yml found in the template folder. Continuing push...[/yellow]")
+
     if not json_output:
         console.print(f"[bold green]Zipping {target_path.name} for deployment...[/bold green]")
         
