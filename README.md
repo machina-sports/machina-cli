@@ -2,7 +2,7 @@
 
 The official command-line interface for the [Machina Sports](https://machina.gg) AI Agent platform.
 
-Manage organizations, projects, workflows, agents, and templates directly from your terminal.
+Manage organizations, projects, workflows, agents, skills, and templates directly from your terminal.
 
 ## Install
 
@@ -43,6 +43,7 @@ machina project use <project-id>
 # 4. Explore project resources
 machina workflow list
 machina agent list
+machina skills list
 machina template list
 ```
 
@@ -191,13 +192,25 @@ machina execution get <id> --compact   # Compact output
 machina execution get <id> --json      # Full JSON output
 ```
 
-### Templates
+### Skills
+
+```bash
+machina skills list                    # Browse skills/packages from the registry
+machina skills install <path>          # Install a skill/package
+machina skills info <path>             # Show expected skill manifest files
+machina skills run <name>              # Skills-first run surface (bridge placeholder)
+machina skills push <path>             # Push a local skill/package
+```
+
+### Templates (compatibility surface)
 
 ```bash
 machina template list                  # Browse template repository
 machina template list --repo <url>     # Browse a custom repository
 machina template list --branch dev     # Specific branch
 machina template list --json           # Output as JSON
+machina template install <path>        # Install a template/package
+machina template push <path>           # Push a local template/package
 ```
 
 ### Credentials
