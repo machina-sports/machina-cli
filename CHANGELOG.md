@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.16] - 2026-04-05
+
+### Fixed
+- **Lint fixes**: resolve ruff errors in template.py (duplicate imports, misplaced module-level imports, `== False` comparisons)
+
 ## [0.2.15] - 2026-04-05
 
 ### Fixed
