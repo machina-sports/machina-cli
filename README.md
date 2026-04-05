@@ -198,6 +198,37 @@ machina template list                  # Browse template repository
 machina template list --repo <url>     # Browse a custom repository
 machina template list --branch dev     # Specific branch
 machina template list --json           # Output as JSON
+machina template install <path>        # Install a template (provisions cloud resources + downloads files)
+machina template install <path> --json # Install with structured JSON output (for agent integration)
+machina template push ./my-agent       # Push a local custom template to the Machina Cloud Pod
+```
+
+#### Installing a template
+
+Templates are fully packaged agent workflows with connectors, mappings, prompts, and datasets.
+
+```bash
+# 1. Browse available templates
+machina template list
+
+# 2. Install one (e.g. agent-templates/bundesliga-podcast)
+machina template install agent-templates/bundesliga-podcast
+
+# This will:
+#   - Provision cloud resources (connectors, datasets, mappings) on your project
+#   - Download the template files (SKILL.md, workflow configs) to ./bundesliga-podcast/
+```
+
+#### Pushing a custom template
+
+```bash
+# Create or modify a template locally, then push it
+machina template push ./my-custom-agent
+
+# This will:
+#   - Validate _install.yml (pre-flight linter)
+#   - Zip and upload to the Machina Cloud Pod
+#   - Provision webhook endpoints and data streams
 ```
 
 ### Credentials
