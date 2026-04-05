@@ -23,6 +23,9 @@ class MachinaClient:
         headers = {"Content-Type": "application/json"}
         if header_name and token:
             headers[header_name] = token
+        else:
+            console.print("[red]Not authenticated. Run `machina login` first.[/red]")
+            raise SystemExit(1)
         return headers
 
     def _handle_response(self, response: httpx.Response) -> dict:
@@ -40,8 +43,8 @@ class MachinaClient:
                 error_msg = error.get("message", "")
 
         if response.status_code == 401:
-            msg = error_msg or "Session expired. Run `machina login` to re-authenticate."
-            console.print(f"[red]{msg}[/red]")
+            console.print(f"[red]{error_msg or 'Session expired.'}[/red]")
+            console.print("[yellow]Run `machina login` to re-authenticate.[/yellow]")
             raise SystemExit(1)
         if response.status_code == 403:
             msg = error_msg or "Permission denied."

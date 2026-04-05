@@ -1,4 +1,3 @@
-import os
 """HTTP client for Machina Client API (per-project resources).
 
 The Client API serves project-level resources (workflows, agents, templates, etc.)
@@ -16,6 +15,7 @@ from rich.console import Console
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import (
+    _clear_credential,
     get_config,
     get_credential,
     resolve_auth_token,
@@ -58,6 +58,9 @@ def _get_project_session(project_id: str) -> dict:
                 result = {"token": stored, "api_url": payload.get("api", "")}
                 _project_cache[project_id] = result
                 return result
+            else:
+                # Clear expired project token
+                _clear_credential(f"project_token_{project_id}")
         except Exception:
             pass
 
@@ -133,10 +136,11 @@ class ProjectClient:
                 error_msg = error
 
         if response.status_code == 401:
-            # Clear cached project token and retry hint
+            # Clear cached and stored project token
             _project_cache.pop(self.project_id, None)
-            msg = error_msg or "Project session expired. Try again."
-            console.print(f"[red]{msg}[/red]")
+            _clear_credential(f"project_token_{self.project_id}")
+            console.print(f"[red]{error_msg or 'Project session expired.'}[/red]")
+            console.print("[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]")
             raise SystemExit(1)
         if response.status_code == 403:
             console.print(f"[red]{error_msg or 'Permission denied.'}[/red]")

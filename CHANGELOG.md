@@ -2,6 +2,13 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.15] - 2026-04-05
+
+### Fixed
+- **Expired token detection**: session tokens are now checked for JWT expiry before API calls — expired tokens are automatically cleared with a clear "not authenticated" message instead of hitting the API and getting cryptic "Invalid Session Key" errors
+- **Project token cleanup**: expired project tokens are now cleared from credentials on detection or 401 response, so re-running the command auto-refreshes
+- **Auth guard on API calls**: unauthenticated requests are caught early with guidance to run `machina login`
+
 ## [0.2.14] - 2026-03-30
 
 ### Fixed
