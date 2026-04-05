@@ -13,6 +13,27 @@ app = typer.Typer(help="Skills management")
 console = Console()
 
 CONSTRUCTOR_SKILL_PATH = "skills/mkn-constructor"
+CONSTRUCTOR_LOCAL_DIR = "mkn-constructor"
+
+
+def _ensure_constructor_installed(
+    project_id: Optional[str] = None,
+    repo: str = template.DEFAULT_REPO,
+    branch: str = template.DEFAULT_BRANCH,
+):
+    """Best-effort bootstrap of mkn-constructor into the current workspace."""
+    local_dir = Path.cwd() / CONSTRUCTOR_LOCAL_DIR
+    if local_dir.exists():
+        return
+
+    console.print(f"[dim]Bootstrapping constructor skill:[/dim] {CONSTRUCTOR_SKILL_PATH}")
+    template.install_template(
+        template_path=CONSTRUCTOR_SKILL_PATH,
+        project_id=project_id,
+        repo=repo,
+        branch=branch,
+        json_output=False,
+    )
 
 
 @app.command("list")
@@ -24,6 +45,7 @@ def list_skills(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List available skills from the template repository."""
+    _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
     return template.list_templates(
         project_id=project_id,
         repo=repo,
@@ -42,6 +64,7 @@ def install_skill(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Install a skill/package from the registry."""
+    _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
     return template.install_template(
         template_path=skill_path,
         project_id=project_id,
@@ -58,6 +81,7 @@ def push_skill(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Push a local skill/package to the Machina pod."""
+    _ensure_constructor_installed(project_id=project_id)
     return template.push_template(
         target_dir=target_dir,
         project_id=project_id,
@@ -70,6 +94,7 @@ def skill_info(
     skill_path: str = typer.Argument(..., help="Path to the skill/template (e.g. skills/mkn-constructor)"),
 ):
     """Show the expected local manifest files for a skill/package."""
+    _ensure_constructor_installed()
     p = Path(skill_path)
     console.print(f"[bold]Skill path:[/bold] {skill_path}")
     console.print(f"[dim]Expected manifest:[/dim] {p / 'skill.yml'}")
@@ -86,6 +111,7 @@ def run_skill(
     Current behavior: instruct the user/operator to use the skill entrypoint from Studio or
     the installed local guide until backend runtime dispatch is formalized.
     """
+    _ensure_constructor_installed()
     console.print(f"[bold]Skill:[/bold] {skill_name}")
     console.print("[yellow]Direct skill runtime dispatch is not formalized in machina-cli yet.[/yellow]")
     console.print("[dim]For now, install the package and follow the skill's SKILL.md or use the Studio Skills run surface.[/dim]")
@@ -100,14 +126,7 @@ def constructor_bridge(
 ):
     """Use mkn-constructor as the built-in authoring bridge for new skills/templates/connectors."""
     if install:
-        console.print(f"[bold green]Installing constructor skill:[/bold green] {CONSTRUCTOR_SKILL_PATH}")
-        template.install_template(
-            template_path=CONSTRUCTOR_SKILL_PATH,
-            project_id=project_id,
-            repo=repo,
-            branch=branch,
-            json_output=False,
-        )
+        _ensure_constructor_installed(project_id=project_id, repo=repo, branch=branch)
 
     console.print(Panel.fit(
         f"[bold]Constructor skill:[/bold] {CONSTRUCTOR_SKILL_PATH}\n"
