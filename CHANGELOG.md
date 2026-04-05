@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.17] - 2026-04-05
+
+### Fixed
+- **Browser login 404**: switch auth flow from `/cli/auth` (page not deployed) to `/clerk/sign-in?cli_callback=...` which is handled by the SESSION middleware directly
+
 ## [0.2.16] - 2026-04-05
 
 ### Fixed
