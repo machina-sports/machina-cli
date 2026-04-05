@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.19] - 2026-04-05
+
+### Fixed
+- **API key login verification**: `login/session` returns 500 with API keys — now falls back to org search as verification, with clear feedback on success or failure
+
 ## [0.2.18] - 2026-04-05
 
 ### Fixed
