@@ -1,6 +1,5 @@
 """Template management commands."""
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -108,10 +107,6 @@ def list_templates(
 
     console.print(tree)
     console.print(f"\n  [dim]{len(paths)} directories, {len(top_level)} categories[/dim]")
-import os
-from pathlib import Path
-
-
 
 
 
@@ -126,8 +121,6 @@ def install_template(
     """Install a template: Provisions cloud resources via API and downloads local agent context."""
     import httpx
     import urllib.parse
-    import os
-    from pathlib import Path
     import json
 
     client = ProjectClient(project_id)
@@ -135,24 +128,25 @@ def install_template(
     
     if not json_output:
         console.print(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]")
-        
+
     payload = [{
         "repo_url": repo,
-        "branch": branch,
+        "repo_branch": branch,
         "template": template_path,
-        "private_repository": False
+        "private_repository": False,
     }]
-    
-    # Hit the real backend endpoint used by MCP
-    result = client.post("templates/directories/git", payload) # Reverted to default mock to avoid crash during PR
-        
-    if isinstance(result, dict) and result.get("status") == False:
-        error_msg = result.get('error', 'Unknown error')
+
+    result = client.post("templates/git", payload)
+
+    if isinstance(result, dict) and result.get("status") == "error":
+        error_msg = result.get('error', {})
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get('message', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
             console.print(f"[red]Cloud provisioning failed:[/red] {error_msg}")
-            console.print("\n[yellow]Agent Action:[/yellow] Verify `machina login` tokens are valid and the template path exists.")
+            console.print("\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]")
         raise typer.Exit(1)
         
     if not json_output:
@@ -221,7 +215,6 @@ def push_template(
     import shutil
     import tempfile
     import json
-    from pathlib import Path
     
     client = ProjectClient(project_id)
     target_path = Path(target_dir).resolve()
@@ -262,7 +255,6 @@ def push_template(
         except Exception as e:
             error_msg = f"Malformed _install.yml: {str(e)}"
             if json_output:
-                import json
                 console.print_json(json.dumps({"status": "error", "message": error_msg, "agent_instruction": "Fix the _install.yml syntax using the mkn-constructor schema and retry push."}))
             else:
                 console.print(f"[bold red]Pre-Flight Linter Failed![/bold red] {error_msg}")
@@ -282,12 +274,14 @@ def push_template(
         zip_file = f"{zip_path}.zip"
         
         if not json_output:
-            console.print(f"[bold green]Deploying to Machina Cloud Pod...[/bold green]")
+            console.print("[bold green]Deploying to Machina Cloud Pod...[/bold green]")
             
-        result = client.post_file("templates/upload", zip_file) # Adjusted to backend POST /templates/upload endpoint
-        
-    if isinstance(result, dict) and result.get("status") == False:
-        error_msg = result.get('error', 'Unknown error')
+        result = client.post_file("templates/upload", zip_file)
+
+    if isinstance(result, dict) and result.get("status") == "error":
+        error_msg = result.get('error', {})
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get('message', 'Unknown error')
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:

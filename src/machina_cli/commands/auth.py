@@ -37,6 +37,7 @@ def do_login(
         store_credential("api_key", api_key)
         console.print("[green]API key stored successfully.[/green]")
 
+        # Verify the key works — try login/session first, fall back to org search
         client = MachinaClient()
         try:
             result = client.get("login/session")
@@ -44,7 +45,19 @@ def do_login(
             name = user_data.get("name", "Unknown")
             console.print(f"Authenticated as [bold]{name}[/bold]")
         except SystemExit:
-            console.print("[yellow]Warning: Could not verify API key. It has been stored anyway.[/yellow]")
+            # login/session may not support API key auth — try listing orgs instead
+            try:
+                result = client.post("user/organizations/search", {
+                    "filters": {}, "page": 1, "page_size": 1, "sorters": ["name", 1],
+                })
+                orgs = result.get("data", [])
+                if orgs:
+                    org_name = orgs[0].get("organization_name", orgs[0].get("name", ""))
+                    console.print(f"Authenticated — org: [bold]{org_name}[/bold]")
+                else:
+                    console.print("[green]API key verified.[/green]")
+            except SystemExit:
+                console.print("[yellow]API key stored but could not verify. Check the key is valid.[/yellow]")
         return
 
     # Mode 3: Username/password (explicit flag)

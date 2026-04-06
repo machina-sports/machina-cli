@@ -2,6 +2,46 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.21] - 2026-04-05
+
+### Fixed
+- **Template install**: use correct endpoint `templates/git` (was `templates/directories/git`) and field name `repo_branch` (was `branch`), matching the Studio implementation
+
+## [0.2.20] - 2026-04-05
+
+### Fixed
+- **`machina version`**: now reports the correct version from `__version__` instead of stale pip metadata
+- **API key auto-fallback**: when an API key returns 500 (e.g. missing from Redis), the CLI automatically clears it and retries with the session token if available
+- **Login enters REPL**: `machina login` now starts the interactive REPL after successful authentication instead of exiting
+
+## [0.2.19] - 2026-04-05
+
+### Fixed
+- **API key login verification**: `login/session` returns 500 with API keys — now falls back to org search as verification, with clear feedback on success or failure
+
+## [0.2.18] - 2026-04-05
+
+### Fixed
+- **Template install/push**: fix false-positive error checks that could treat successful responses as failures (status check now only triggers on explicit `"error"` status)
+- **Template cleanup**: remove duplicate imports, dead comments, and extra blank lines from template.py
+
+## [0.2.17] - 2026-04-05
+
+### Fixed
+- **Browser login 404**: switch auth flow from `/cli/auth` (page not deployed) to `/clerk/sign-in?cli_callback=...` which is handled by the SESSION middleware directly
+
+## [0.2.16] - 2026-04-05
+
+### Fixed
+- **Lint fixes**: resolve ruff errors in template.py (duplicate imports, misplaced module-level imports, `== False` comparisons)
+
+## [0.2.15] - 2026-04-05
+
+### Fixed
+- **Expired token detection**: session tokens are now checked for JWT expiry before API calls — expired tokens are automatically cleared with a clear "not authenticated" message instead of hitting the API and getting cryptic "Invalid Session Key" errors
+- **Project token cleanup**: expired project tokens are now cleared from credentials on detection or 401 response, so re-running the command auto-refreshes
+- **Auth guard on API calls**: unauthenticated requests are caught early with guidance to run `machina login`
+
 ## [0.2.14] - 2026-03-30
 
 ### Fixed

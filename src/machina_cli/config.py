@@ -75,6 +75,14 @@ def get_credential(key: str) -> Optional[str]:
     return _load_creds().get(key)
 
 
+def _clear_credential(key: str):
+    """Remove a single credential from ~/.machina/credentials.json."""
+    creds = _load_creds()
+    if key in creds:
+        del creds[key]
+        _save_creds(creds)
+
+
 def clear_credentials():
     """Remove all stored credentials."""
     if CREDS_FILE.exists():
@@ -83,6 +91,19 @@ def clear_credentials():
 
 def get_api_url() -> str:
     return os.environ.get("MACHINA_API_URL") or get_config("api_url") or DEFAULT_CONFIG["api_url"]
+
+
+def _is_jwt_expired(token: str) -> bool:
+    """Check if a JWT token is expired by decoding the payload."""
+    import base64
+    import time
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("exp", 0) < time.time()
+    except Exception:
+        return False
 
 
 def resolve_auth_token() -> tuple[str, str]:
@@ -101,9 +122,13 @@ def resolve_auth_token() -> tuple[str, str]:
     if stored_key:
         return ("X-Api-Token", stored_key)
 
-    # 3. Stored session token
+    # 3. Stored session token (check expiry)
     stored_session = get_credential("session_token")
     if stored_session:
+        if _is_jwt_expired(stored_session):
+            # Clear expired token so user gets a clear "not authenticated" message
+            _clear_credential("session_token")
+            return ("", "")
         return ("X-Session-Token", stored_session)
 
     return ("", "")

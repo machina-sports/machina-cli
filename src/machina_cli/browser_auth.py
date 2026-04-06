@@ -152,11 +152,11 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
     port = _find_free_port()
     callback_url = f"http://localhost:{port}/callback"
 
-    # Primary flow: /cli/auth page that works even if user is already logged in.
-    # It calls /api/auth/cli-token (server-side) and redirects to localhost with token.
-    # If user is NOT logged in with Clerk, Clerk middleware will redirect to sign-in first.
-    params = urlencode({"callback": callback_url})
-    auth_url = f"{session_url}/cli/auth?{params}"
+    # Flow: /clerk/sign-in with cli_callback param.
+    # The SESSION middleware detects cli_callback, bridges with backend via
+    # /check-session, extracts the session token, and redirects to localhost.
+    params = urlencode({"cli_callback": callback_url})
+    auth_url = f"{session_url}/clerk/sign-in?{params}"
 
     # Start local server
     server = HTTPServer(("127.0.0.1", port), _AuthCallbackHandler)

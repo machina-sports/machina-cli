@@ -199,8 +199,8 @@ machina execution get <id> --json      # Full JSON output
 ```bash
 machina skills list                    # Browse skills/packages from the registry
 machina skills install <path>          # Install a skill/package
-machina skills info <path>             # Show expected skill manifest files
-machina skills run <name>              # Skills-first run surface (bridge placeholder)
+machina skills info <path>             # Show skill metadata and manifest when available
+machina skills run <name>              # Resolve a skill entrypoint into workflow/agent runtime
 machina skills push <path>             # Push a local skill/package
 machina skills constructor             # Manually re-run the mkn-constructor authoring bridge
 ```
@@ -212,8 +212,37 @@ machina template list                  # Browse template repository
 machina template list --repo <url>     # Browse a custom repository
 machina template list --branch dev     # Specific branch
 machina template list --json           # Output as JSON
-machina template install <path>        # Install a template/package
-machina template push <path>           # Push a local template/package
+machina template install <path>        # Install a template (provisions cloud resources + downloads files)
+machina template install <path> --json # Install with structured JSON output (for agent integration)
+machina template push ./my-agent       # Push a local custom template to the Machina Cloud Pod
+```
+
+#### Installing a template
+
+Templates are fully packaged agent workflows with connectors, mappings, prompts, and datasets.
+
+```bash
+# 1. Browse available templates
+machina template list
+
+# 2. Install one (e.g. agent-templates/bundesliga-podcast)
+machina template install agent-templates/bundesliga-podcast
+
+# This will:
+#   - Provision cloud resources (connectors, datasets, mappings) on your project
+#   - Download the template files (SKILL.md, workflow configs) to ./bundesliga-podcast/
+```
+
+#### Pushing a custom template
+
+```bash
+# Create or modify a template locally, then push it
+machina template push ./my-custom-agent
+
+# This will:
+#   - Validate _install.yml (pre-flight linter)
+#   - Zip and upload to the Machina Cloud Pod
+#   - Provision webhook endpoints and data streams
 ```
 
 ### Credentials
