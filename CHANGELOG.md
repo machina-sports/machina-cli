@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.22] - 2026-04-06
+
+### Added
+- **`machina auth clear-session`**: nuclear option to clear all local credentials + browser cookies when staging login is stuck in a loop
+- **`machina auth logout`**: now also opens browser to clear server-side session cookies (Clerk + machina)
+
 ## [0.2.21] - 2026-04-05
 
 ### Fixed

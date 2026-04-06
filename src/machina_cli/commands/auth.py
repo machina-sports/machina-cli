@@ -121,9 +121,36 @@ def login(
 
 @app.command()
 def logout():
-    """Clear stored credentials."""
+    """Clear stored credentials and optionally clear browser session."""
     clear_credentials()
-    console.print("Logged out. Credentials cleared.")
+    console.print("[green]Local credentials cleared.[/green]")
+
+    # Open browser logout to clear session cookies (Clerk + machina session)
+    session_url = get_config("session_url") or "https://session.machina.gg"
+    import webbrowser
+    console.print("[dim]Opening browser to clear session cookies...[/dim]")
+    webbrowser.open(f"{session_url}/logout")
+    console.print("[green]Logged out completely.[/green]")
+
+
+@app.command("clear-session")
+def clear_session():
+    """Nuclear option: clear ALL local credentials, project tokens, and browser cookies.
+
+    Use when staging login is stuck in a loop or cookies are stale.
+    """
+    # Clear all stored credentials
+    clear_credentials()
+    console.print("[green]All local credentials cleared.[/green]")
+
+    # Open browser to clear session cookies on the SESSION app
+    session_url = get_config("session_url") or "https://session.machina.gg"
+    import webbrowser
+    console.print("[dim]Opening browser to clear server-side cookies...[/dim]")
+    webbrowser.open(f"{session_url}/logout")
+
+    console.print()
+    console.print("[bold]Session fully cleared.[/bold] Run [bold #FF5C1F]machina login[/bold #FF5C1F] to re-authenticate.")
 
 
 @app.command()
