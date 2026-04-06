@@ -9,7 +9,7 @@ from rich.text import Text
 from machina_cli import __version__
 from machina_cli.commands import (
     auth, org, project, credentials, deploy, config_cmd,
-    workflow, agent, template, execution,
+    workflow, agent, template, execution, skills,
     connector, mapping, prompt, document,
 )
 from machina_cli.commands.auth import do_login
@@ -33,7 +33,8 @@ CMD_GROUPS = [
     ]),
     ("Operations", [
         ("execution", "Executions"),
-        ("template", "Templates"),
+        ("skills", "Skills"),
+        ("template", "Templates (compat)"),
         ("deploy", "Deployments"),
         ("update", "Self-update"),
     ]),
@@ -134,6 +135,7 @@ app.add_typer(project.app, name="project", help="Project management")
 app.add_typer(workflow.app, name="workflow", help="Workflow management")
 app.add_typer(agent.app, name="agent", help="Agent management")
 app.add_typer(template.app, name="template", help="Template management")
+app.add_typer(skills.app, name="skills", help="Skills management")
 app.add_typer(execution.app, name="execution", help="Execution management")
 app.add_typer(connector.app, name="connector", help="Connector management")
 app.add_typer(mapping.app, name="mapping", help="Mapping management")

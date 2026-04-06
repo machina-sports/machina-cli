@@ -18,7 +18,7 @@ console = Console()
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
     "org", "project", "workflow", "agent", "connector",
-    "mapping", "prompt", "document", "template", "execution",
+    "mapping", "prompt", "document", "skills", "template", "execution",
     "credentials", "deploy", "config", "auth",
     "help", "exit", "quit", "clear",
 ]
@@ -33,7 +33,8 @@ SUB_COMMANDS = {
     "mapping": ["list", "get"],
     "prompt": ["list", "get"],
     "document": ["list", "get"],
-    "template": ["list"],
+    "skills": ["list", "install", "info", "run", "push", "constructor"],
+    "template": ["list", "install", "push"],
     "execution": ["get", "list"],
     "credentials": ["list", "generate", "revoke"],
     "deploy": ["start", "status", "restart"],
@@ -132,7 +133,8 @@ def _show_help():
         ]),
         ("Operations", [
             ("execution list|get <id>", "Execution history"),
-            ("template list", "Template repository"),
+            ("skills list|install|info|run|push|constructor", "Skills-first surface"),
+            ("template list|install|push", "Template compatibility surface"),
             ("deploy start|status|restart", "Deployments"),
             ("config list|set|get", "Configuration"),
         ]),

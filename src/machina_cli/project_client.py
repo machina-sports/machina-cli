@@ -1,3 +1,4 @@
+import os
 """HTTP client for Machina Client API (per-project resources).
 
 The Client API serves project-level resources (workflows, agents, templates, etc.)
