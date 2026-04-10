@@ -1,4 +1,3 @@
-import os
 """HTTP client for Machina Client API (per-project resources).
 
 The Client API serves project-level resources (workflows, agents, templates, etc.)
@@ -9,6 +8,8 @@ Authentication requires both:
 - X-Project-Token: project session (from POST /login/project on Core API)
 """
 
+import mimetypes
+import os
 from typing import Optional
 
 import httpx
@@ -181,8 +182,6 @@ class ProjectClient:
 
     def post_file(self, path: str, file_path: str, data: dict = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
-        import mimetypes
-        import os
         mime_type, _ = mimetypes.guess_type(file_path)
         mime_type = mime_type or 'application/octet-stream'
         
