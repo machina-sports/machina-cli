@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.23] - 2026-04-12
+
+### Added
+- **MFA support for `--with-credentials` login**: when a user has MFA enabled, the CLI prompts for a TOTP code or backup code and completes verification via `POST /mfa/verify`
+- **Skills commands**: `machina skills list`, `machina skills run` for managing and executing project skills
+
 ## [0.2.22] - 2026-04-06
 
 ### Added
