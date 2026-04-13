@@ -20,6 +20,38 @@ console = Console()
 DEFAULT_SESSION_URL = "https://session.machina.gg"
 
 
+def _handle_mfa_challenge(client: "MachinaClient", data: dict) -> str | None:
+    """Handle MFA challenge during username/password login."""
+    challenge_token = data.get("mfa_challenge_token", "")
+    methods = data.get("mfa_methods", [])
+
+    console.print(f"[yellow]Two-factor authentication required.[/yellow]")
+    console.print(f"Available methods: {', '.join(methods)}")
+
+    # Determine method
+    if len(methods) == 1:
+        method = methods[0]
+    else:
+        method = typer.prompt("Method (totp/backup_code)", default="totp")
+
+    if method == "totp":
+        code = typer.prompt("Enter the 6-digit code from your authenticator app")
+    else:
+        code = typer.prompt("Enter your backup code")
+
+    result = client.post(
+        "mfa/verify",
+        {
+            "mfa_challenge_token": challenge_token,
+            "code": code,
+            "method": method,
+        },
+        skip_auth=True,
+    )
+
+    return result.get("data", {}).get("token")
+
+
 def do_login(
     api_key: Optional[str] = None,
     username: Optional[str] = None,
@@ -70,7 +102,14 @@ def do_login(
         client = MachinaClient()
         result = client.post("login", {"username": username, "password": password}, skip_auth=True)
 
-        token = result.get("data", {}).get("token")
+        data = result.get("data", {})
+
+        # Handle MFA challenge
+        if data.get("mfa_required"):
+            token = _handle_mfa_challenge(client, data)
+        else:
+            token = data.get("token")
+
         if not token:
             console.print("[red]Login failed: no token received.[/red]")
             raise typer.Exit(1)
