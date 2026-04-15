@@ -19,7 +19,7 @@ console = Console()
 REPL_COMMANDS = [
     "org", "project", "workflow", "agent", "connector",
     "mapping", "prompt", "document", "skills", "template", "execution",
-    "credentials", "deploy", "config", "auth",
+    "credentials", "deploy", "config", "auth", "search",
     "help", "exit", "quit", "clear",
 ]
 
@@ -120,6 +120,7 @@ def _show_help():
         ("Platform", [
             ("org list|create|use", "Organizations"),
             ("project list|create|use|status", "Projects"),
+            ("search <query>", "Search all project resources"),
             ("credentials list|generate|revoke", "API keys"),
             ("auth login|logout|whoami", "Authentication"),
         ]),
@@ -199,7 +200,7 @@ def _dispatch(line: str):
         "limit", "page", "json", "compact", "sync", "watch",
         "show-keys", "copy", "repo", "branch", "private", "force",
         "api-key", "with-credentials", "username", "password",
-        "slug", "level",
+        "slug", "level", "type",
     }
     # Find where flags start (skip command words like "project list", "workflow get")
     flag_start = min(2, len(args))
