@@ -10,7 +10,7 @@ from machina_cli import __version__
 from machina_cli.commands import (
     auth, org, project, credentials, deploy, config_cmd,
     workflow, agent, template, execution, skills,
-    connector, mapping, prompt, document,
+    connector, mapping, prompt, document, search,
 )
 from machina_cli.commands.auth import do_login
 
@@ -21,6 +21,7 @@ CMD_GROUPS = [
         ("login", "Authenticate"),
         ("org", "Organizations"),
         ("project", "Projects"),
+        ("search", "Search all resources"),
         ("credentials", "API keys"),
     ]),
     ("Resources", [
@@ -205,6 +206,24 @@ def version():
     """Show CLI version."""
     console.print(f"machina-cli v{get_version()}")
 
+
+@app.command(name="search")
+def search_cmd(
+    query: str = typer.Argument(..., help="Search query string"),
+    type: str = typer.Option(None, "--type", "-t", help="Filter by resource type (workflow, agent, etc)"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    project_id: str = typer.Option(None, "--project", "-p", help="Project ID"),
+):
+    """Search all project resources (workflows, agents, connectors, etc)."""
+    from machina_cli.commands.search import do_search
+    do_search(
+        query=query,
+        resource_type=type,
+        limit=limit,
+        json_output=json_output,
+        project_id=project_id,
+    )
 
 if __name__ == "__main__":
     app()
