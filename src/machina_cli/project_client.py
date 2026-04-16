@@ -42,6 +42,15 @@ def _get_project_session(project_id: str) -> dict:
     if project_id in _project_cache:
         return _project_cache[project_id]
 
+    # Direct client-api mode: use API key directly against client-api URL
+    # This allows Factory sandbox and CI/CD to use project API keys without core-api login
+    client_api_url = get_config("client_api_url")
+    api_key = get_credential("api_key") or os.environ.get("MACHINA_API_KEY")
+    if client_api_url and api_key:
+        result = {"token": api_key, "api_url": client_api_url, "direct_api_key": True}
+        _project_cache[project_id] = result
+        return result
+
     # Check if we have a stored project token
     stored = get_credential(f"project_token_{project_id}")
     if stored:
@@ -113,13 +122,17 @@ class ProjectClient:
         session = _get_project_session(self.project_id)
         self.api_url = session["api_url"].rstrip("/")
         self.project_token = session["token"]
+        self.direct_api_key = session.get("direct_api_key", False)
 
     def _headers(self) -> dict:
-        header_name, session_token = resolve_auth_token()
         headers = {"Content-Type": "application/json"}
-        if header_name and session_token:
-            headers["X-Session-Token"] = session_token
-        headers["X-Project-Token"] = self.project_token
+        if self.direct_api_key:
+            headers["X-Api-Token"] = self.project_token
+        else:
+            header_name, session_token = resolve_auth_token()
+            if header_name and session_token:
+                headers["X-Session-Token"] = session_token
+            headers["X-Project-Token"] = self.project_token
         return headers
 
     def _handle_response(self, response: httpx.Response) -> dict:

@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
     "session_url": "https://session.machina.gg",
     "default_organization_id": "",
     "default_project_id": "",
+    "client_api_url": "",
     "output_format": "table",
 }
 
