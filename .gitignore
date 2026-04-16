@@ -8,3 +8,4 @@ build/
 *.egg
 .mypy_cache/
 .ruff_cache/
+.refs/
