@@ -25,7 +25,7 @@ def _handle_mfa_challenge(client: "MachinaClient", data: dict) -> str | None:
     challenge_token = data.get("mfa_challenge_token", "")
     methods = data.get("mfa_methods", [])
 
-    console.print(f"[yellow]Two-factor authentication required.[/yellow]")
+    console.print("[yellow]Two-factor authentication required.[/yellow]")
     console.print(f"Available methods: {', '.join(methods)}")
 
     # Determine method
