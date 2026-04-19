@@ -109,3 +109,34 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  refresh-factory-worker:
+    # After a successful PyPI release, poke the machina-factory worker on
+    # Render so its Docker image rebuilds with the freshly published CLI.
+    # The worker also runs `pip install -U machina-cli` on boot, so this
+    # hook is the belt-and-suspenders path that closes the window where a
+    # warm worker keeps serving jobs with the older baked-in CLI.
+    #
+    # Requires repo secret RENDER_DEPLOY_HOOK — a Deploy Hook URL created
+    # at https://dashboard.render.com/worker/srv-d7fsrgosfn5c73fs6l20
+    # (Settings → Deploy Hook). The step no-ops when the secret is missing
+    # so releases stay unblocked if the hook is rotated or not yet set.
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK not configured — skipping factory worker refresh."
+            exit 0
+          fi
+          echo "Triggering Render deploy for machina-factory worker..."
+          status=$(curl -sS -o /tmp/render_resp.json -w "%{http_code}" -X POST "$HOOK" || echo "000")
+          echo "Render responded with HTTP $status"
+          cat /tmp/render_resp.json | head -c 500 || true
+          echo
+          if [ "$status" != "200" ] && [ "$status" != "201" ]; then
+            echo "::warning::Render deploy hook returned $status; the worker's on-boot refresh will still pick up the new CLI on its next restart."
+          fi
