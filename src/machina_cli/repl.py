@@ -18,7 +18,7 @@ console = Console()
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
     "org", "project", "workflow", "agent", "connector",
-    "mapping", "prompt", "document", "skills", "template", "execution",
+    "mapping", "prompt", "document", "skills", "sports", "template", "execution",
     "credentials", "deploy", "config", "auth",
     "help", "exit", "quit", "clear",
 ]
@@ -34,6 +34,13 @@ SUB_COMMANDS = {
     "prompt": ["list", "get"],
     "document": ["list", "get"],
     "skills": ["list", "install", "info", "run", "push", "constructor"],
+    # `sports` is a dynamic passthrough to sports-skills; tab completion only
+    # offers the currently-registered top-level modules.
+    "sports": [
+        "football", "f1", "nfl", "nba", "wnba", "nhl", "mlb", "tennis",
+        "cfb", "cbb", "golf", "volleyball", "polymarket", "kalshi", "betting",
+        "markets", "metadata", "news", "catalog",
+    ],
     "template": ["list", "install", "push"],
     "execution": ["get", "list"],
     "credentials": ["list", "generate", "revoke"],

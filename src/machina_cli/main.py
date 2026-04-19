@@ -10,7 +10,7 @@ from machina_cli import __version__
 from machina_cli.commands import (
     auth, org, project, credentials, deploy, config_cmd,
     workflow, agent, template, execution, skills,
-    connector, mapping, prompt, document,
+    connector, mapping, prompt, document, sports,
 )
 from machina_cli.commands.auth import do_login
 
@@ -34,6 +34,7 @@ CMD_GROUPS = [
     ("Operations", [
         ("execution", "Executions"),
         ("skills", "Skills"),
+        ("sports", "Sports-skills passthrough"),
         ("template", "Templates (compat)"),
         ("deploy", "Deployments"),
         ("update", "Self-update"),
@@ -144,6 +145,9 @@ app.add_typer(document.app, name="document", help="Document management")
 app.add_typer(credentials.app, name="credentials", help="API key management")
 app.add_typer(deploy.app, name="deploy", help="Deployment management")
 app.add_typer(config_cmd.app, name="config", help="Configuration management")
+
+# Mount the sports-skills CLI dynamically under `machina sports …`.
+sports.register(app)
 
 
 @app.command(hidden=True)
