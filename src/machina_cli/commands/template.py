@@ -116,25 +116,42 @@ def install_template(
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
+    private: bool = typer.Option(False, "--private", help="Mark the source repo as private (sends --gh-token / GH_TOKEN to the install endpoint)."),
+    gh_token: Optional[str] = typer.Option(None, "--gh-token", envvar="GH_TOKEN", help="GitHub token for cloning a private repo. Falls back to GH_TOKEN / GITHUB_TOKEN env vars."),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
 ):
     """Install a template: Provisions cloud resources via API and downloads local agent context."""
     import httpx
+    import os
     import urllib.parse
     import json
 
     client = ProjectClient(project_id)
     template_name = template_path.split('/')[-1]
-    
+
+    # Auto-detect private repo when a GH token is around but --private wasn't
+    # passed; resolves the GITHUB_TOKEN fallback transparently.
+    if not gh_token:
+        gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if private and not gh_token:
+        console.print(
+            "[red]--private was set but no GitHub token is available.[/red] "
+            "Pass --gh-token, or export GH_TOKEN / GITHUB_TOKEN.",
+        )
+        raise typer.Exit(1)
+
     if not json_output:
         console.print(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]")
 
-    payload = [{
+    install_entry: dict = {
         "repo_url": repo,
         "repo_branch": branch,
         "template": template_path,
-        "private_repository": False,
-    }]
+        "private_repository": private,
+    }
+    if gh_token:
+        install_entry["gh_token"] = gh_token
+    payload = [install_entry]
 
     result = client.post("templates/git", payload)
 
@@ -164,9 +181,12 @@ def install_template(
         
     api_url = f"https://api.github.com/repos/{owner_repo}/contents/{urllib.parse.quote(template_path)}?ref={branch}"
     
+    gh_headers = {"Accept": "application/vnd.github.v3+json"}
+    if gh_token:
+        gh_headers["Authorization"] = f"Bearer {gh_token}"
     try:
         with httpx.Client(timeout=30.0) as http_client:
-            resp = http_client.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+            resp = http_client.get(api_url, headers=gh_headers)
             if resp.status_code == 200:
                 files = resp.json()
                 if isinstance(files, list):
@@ -175,7 +195,14 @@ def install_template(
                             download_url = file_info.get("download_url")
                             file_name = file_info.get("name")
                             if download_url and file_name:
-                                file_resp = http_client.get(download_url)
+                                file_resp = http_client.get(
+                                    download_url,
+                                    headers=(
+                                        {"Authorization": f"Bearer {gh_token}"}
+                                        if gh_token
+                                        else None
+                                    ),
+                                )
                                 if file_resp.status_code == 200:
                                     with open(local_dir / file_name, "wb") as f:
                                         f.write(file_resp.content)
