@@ -2,6 +2,15 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.24] - 2026-04-20
+
+### Added
+- **`machina sports …`**: full sports-skills CLI mounted dynamically under `machina sports` (catalog, schema, every domain — `football`, `f1`, `nfl`, `polymarket`, …). Output is byte-identical to running `sports-skills` directly, and new sports-skills releases surface automatically without a machina-cli upgrade.
+- **`machina template install --private` + `--gh-token`**: install a template from a private GitHub repo. `--gh-token` falls back to `GH_TOKEN` / `GITHUB_TOKEN` env vars, and is forwarded both to the platform's `templates/git` endpoint and to the GitHub-API contents fetch used to download local agent context.
+
+### Fixed
+- **Lint**: drop an extraneous f-string prefix in `auth.py` that was breaking ruff CI on main.
+
 ## [0.2.23] - 2026-04-12
 
 ### Added
