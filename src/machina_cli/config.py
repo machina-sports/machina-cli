@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "default_organization_id": "",
     "default_project_id": "",
     "client_api_url": "",
+    "factory_url": "https://customers.machina.gg",
     "output_format": "table",
 }
 
