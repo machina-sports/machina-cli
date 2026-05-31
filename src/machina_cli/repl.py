@@ -18,8 +18,9 @@ console = Console()
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
     "org", "project", "workflow", "agent", "connector",
-    "mapping", "prompt", "document", "skills", "sports", "template", "execution",
-    "credentials", "deploy", "config", "auth",
+    "mapping", "prompt", "document", "skills", "sports", "factory",
+    "template", "execution", "credentials", "deploy", "config", "auth",
+    "login", "update", "version",
     "help", "exit", "quit", "clear",
 ]
 
@@ -40,6 +41,10 @@ SUB_COMMANDS = {
         "football", "f1", "nfl", "nba", "wnba", "nhl", "mlb", "tennis",
         "cfb", "cbb", "golf", "volleyball", "polymarket", "kalshi", "betting",
         "markets", "metadata", "news", "catalog",
+    ],
+    "factory": [
+        "run", "status", "watch", "logs", "follow-up",
+        "cancel", "open-pr", "list", "whoami",
     ],
     "template": ["list", "install", "push"],
     "execution": ["get", "list"],
@@ -141,11 +146,16 @@ def _show_help():
         ("Operations", [
             ("execution list|get <id>", "Execution history"),
             ("skills list|install|info|run|push|constructor", "Skills-first surface"),
+            ("factory run|status|watch|logs|list", "Build apps (Factory coding-agent)"),
+            ("sports <module> <command>", "Sports-skills passthrough"),
             ("template list|install|push", "Template compatibility surface"),
             ("deploy start|status|restart", "Deployments"),
             ("config list|set|get", "Configuration"),
         ]),
         ("Session", [
+            ("login", "Authenticate (browser)"),
+            ("update", "Self-update the CLI"),
+            ("version", "Show CLI version"),
             ("clear", "Clear screen"),
             ("exit", "Exit session"),
         ]),
