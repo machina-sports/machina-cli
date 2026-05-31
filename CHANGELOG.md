@@ -2,6 +2,22 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.2.26] - 2026-05-31
+
+### Changed
+- **REPL `help` + tab-completion now list every command group.** Added the missing `factory` (Build apps / Factory coding-agent) and `sports` (sports-skills passthrough) entries under Operations, plus `login` / `update` / `version` under Session. `factory` and its sub-commands (`run`/`status`/`watch`/`logs`/`follow-up`/`cancel`/`open-pr`/`list`/`whoami`) are now tab-completable.
+
+### Added
+- **`docs/factory.md`** — usage guide for the `machina factory` commands.
+
+## [0.2.25] - 2026-05-30
+
+### Added
+- **`machina factory …`**: trigger Factory coding-agent builds from the CLI. Drives the customer surface (`customers.machina.gg/c/api/*`) using the studio session the CLI already holds — the same auth the `/c` web UI uses, **no new credential**. Commands: `run`, `status`, `watch`, `logs` (live SSE timeline), `follow-up`, `cancel`, `open-pr`, `list`, `whoami`.
+  - **Session mode** (default): reuses your `machina login` session — jobs are owned by your user.
+  - **API-key mode** (headless / CI): set `MACHINA_API_KEY` to a project API key and the CLI sends `X-Api-Token`; jobs are scoped to the key's organization. Requires the matching customers-side change (machina-factory-customer#136).
+  - New config key `factory_url` (default `https://customers.machina.gg`); override with `MACHINA_FACTORY_URL`. Session-cookie name overridable with `MACHINA_SESSION_COOKIE_NAME` (prod default `machina_production_session_name`).
+
 ## [0.2.24] - 2026-04-20
 
 ### Added
