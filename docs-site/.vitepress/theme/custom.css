@@ -1,0 +1,22 @@
+/* Machina Sports brand — the star orange from machina.gg / Studio */
+:root {
+  --vp-c-brand-1: #f4623a;
+  --vp-c-brand-2: #e0552f;
+  --vp-c-brand-3: #f4623a;
+  --vp-c-brand-soft: rgba(244, 98, 58, 0.14);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #f4623a 30%, #ff8a3d);
+  --vp-button-brand-bg: #f4623a;
+  --vp-button-brand-hover-bg: #e0552f;
+  --vp-button-brand-active-bg: #c94a28;
+}
+
+/* Keep the wide wordmark logo readable in the navbar */
+.VPNavBarTitle .logo {
+  height: 22px;
+}
+
+/* Hero wordmark sizing */
+.VPHero .image-src {
+  max-width: 320px;
+}
