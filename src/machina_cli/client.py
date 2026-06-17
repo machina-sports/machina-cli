@@ -20,7 +20,7 @@ class MachinaClient:
 
     def _headers(self) -> dict:
         header_name, token = resolve_auth_token()
-        headers = {"Content-Type": "application/json"}
+        headers = {}
         if header_name and token:
             headers[header_name] = token
         else:
@@ -69,7 +69,7 @@ class MachinaClient:
         """Execute request with automatic API key fallback on 500."""
         url = f"{self.api_url}/{path.lstrip('/')}"
         skip_auth = kwargs.pop("skip_auth", False)
-        headers = {"Content-Type": "application/json"} if skip_auth else self._headers()
+        headers = {} if skip_auth else self._headers()
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
                 response = getattr(client, method)(url, headers=headers, **kwargs)

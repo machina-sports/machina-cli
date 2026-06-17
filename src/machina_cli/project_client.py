@@ -125,7 +125,7 @@ class ProjectClient:
         self.direct_api_key = session.get("direct_api_key", False)
 
     def _headers(self) -> dict:
-        headers = {"Content-Type": "application/json"}
+        headers = {}
         if self.direct_api_key:
             headers["X-Api-Token"] = self.project_token
         else:
