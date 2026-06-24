@@ -1,5 +1,8 @@
 """Configuration commands."""
 
+import json
+import re
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -8,6 +11,17 @@ from machina_cli.config import get_config, load_config, set_config
 
 app = typer.Typer(help="Configuration management")
 console = Console()
+
+# Keys whose values are secrets and must never be printed in bulk output.
+_SECRET_KEY = re.compile(r"(api[_-]?key|token|secret|password)", re.IGNORECASE)
+
+
+def _redact(config: dict) -> dict:
+    """Mask secret-looking values so bulk config output never leaks credentials."""
+    return {
+        k: ("***redacted***" if v and _SECRET_KEY.search(k) else v)
+        for k, v in config.items()
+    }
 
 
 @app.command("set")
@@ -23,9 +37,16 @@ def config_set(
 @app.command("get")
 def config_get(
     key: str = typer.Argument(..., help="Configuration key"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    reveal: bool = typer.Option(False, "--reveal", help="Show secret values (masked by default)"),
 ):
     """Get a configuration value."""
     value = get_config(key)
+    if value and not reveal and _SECRET_KEY.search(key):
+        value = "***redacted***"
+    if json_output:
+        print(json.dumps({"key": key, "value": value}))
+        return
     if value is None:
         console.print(f"[yellow]Key '{key}' not found.[/yellow]")
     else:
@@ -33,9 +54,15 @@ def config_get(
 
 
 @app.command("list")
-def config_list():
+def config_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
     """List all configuration values."""
-    config = load_config()
+    config = _redact(load_config())
+
+    if json_output:
+        print(json.dumps(config))
+        return
 
     table = Table(title="Configuration")
     table.add_column("Key")
