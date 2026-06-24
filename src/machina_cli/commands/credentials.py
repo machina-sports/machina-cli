@@ -1,5 +1,6 @@
 """API key and credentials management commands."""
 
+import json
 from typing import Optional
 
 import typer
@@ -45,11 +46,16 @@ def generate(
     console.print("[dim]Save this key securely — it won't be shown again.[/dim]")
 
 
+def _mask_key(value: str) -> str:
+    return f"{value[:12]}...{value[-6:]}" if len(value) > 20 else value
+
+
 @app.command("list")
 def list_keys(
     project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
     show_keys: bool = typer.Option(False, "--show-keys", "-s", help="Show full API keys (not masked)"),
     copy: Optional[str] = typer.Option(None, "--copy", "-c", help="Copy a key by name (e.g. client-api) to clipboard"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List API keys for a project."""
     client = MachinaClient()
@@ -68,6 +74,19 @@ def list_keys(
     })
 
     keys = result.get("data", [])
+
+    if json_output:
+        # Masked by default; full keys only with --show-keys (matches table output).
+        print(json.dumps([
+            {
+                "name": k.get("name", ""),
+                "id": k.get("_id", ""),
+                "key": k.get("key", "") if show_keys else _mask_key(k.get("key", "")),
+                "masked": not show_keys,
+            }
+            for k in keys
+        ]))
+        return
 
     if not keys:
         console.print("[yellow]No API keys found.[/yellow]")
@@ -100,8 +119,7 @@ def list_keys(
         if show_keys:
             display_key = key_value
         else:
-            masked = f"{key_value[:12]}...{key_value[-6:]}" if len(key_value) > 20 else key_value
-            display_key = f"[dim]{masked}[/dim]"
+            display_key = f"[dim]{_mask_key(key_value)}[/dim]"
 
         table.add_row(
             key.get("name", ""),

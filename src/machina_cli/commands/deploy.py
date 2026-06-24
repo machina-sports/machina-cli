@@ -1,5 +1,6 @@
 """Deployment management commands."""
 
+import json
 from typing import Optional
 
 import typer
@@ -42,6 +43,7 @@ def deploy_start(
 @app.command()
 def status(
     org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Check deployment status."""
     client = MachinaClient()
@@ -49,11 +51,18 @@ def status(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
+        if json_output:
+            print(json.dumps({"error": "no organization specified"}))
+            raise typer.Exit(1)
         console.print("[red]No organization specified. Use --org or set default.[/red]")
         raise typer.Exit(1)
 
     result = client.get(f"organization/{org_id}/client-api-status")
     data = result.get("data", {})
+
+    if json_output:
+        print(json.dumps({"organization": org_id, "status": data.get("status", "unknown")}))
+        return
 
     console.print(Panel.fit(
         f"[bold]Organization:[/bold] {org_id}\n"
