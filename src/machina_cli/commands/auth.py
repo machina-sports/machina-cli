@@ -211,6 +211,8 @@ def whoami(
     try:
         result = client.get("login/session")
     except SystemExit:
+        # MachinaClient raises SystemExit on HTTP/connection errors (detail on stderr);
+        # in --json mode surface a parseable error on stdout instead of swallowing it.
         if json_output:
             print(json.dumps({"authenticated": False, "error": "session lookup failed"}))
             raise typer.Exit(1) from None

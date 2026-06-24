@@ -9,7 +9,11 @@ unified, one-time login. Both files are written with mode `600`.
 > non-secret fields (`expires_at` via the JWT, project ids), but do not transmit or log token
 > values beyond passing them through the user's own session.
 
-## `~/.machina/config.json` (non-secret)
+## `~/.machina/config.json` (non-secret content, mode 600)
+
+This file holds no credentials, but `machina-cli` still writes it `600` (owner-only). Integrators
+reading it from another user account should expect a permission error, not world-readable state.
+
 
 | Key | Meaning | Default |
 | --- | --- | --- |
@@ -19,7 +23,7 @@ unified, one-time login. Both files are written with mode `600`.
 | `default_project_id` | Selected project (set by `machina project use`) | `""` |
 | `client_api_url` | Per-project Client API base, when known | `""` |
 | `factory_url` | Factory customer surface | `https://customers.machina.gg` |
-| `output_format` | Default output (`table`/`json`) | `table` |
+| `output_format` | **Reserved** — present in defaults but not yet consulted by any command; pass `--json/-j` per command for machine output | `table` |
 
 Commands may add convenience keys (e.g. `default_organization_name`, `default_project_name`).
 Readers should treat unknown keys as additive and ignore them.

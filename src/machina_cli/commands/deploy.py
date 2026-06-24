@@ -57,7 +57,14 @@ def status(
         console.print("[red]No organization specified. Use --org or set default.[/red]")
         raise typer.Exit(1)
 
-    result = client.get(f"organization/{org_id}/client-api-status")
+    try:
+        result = client.get(f"organization/{org_id}/client-api-status")
+    except SystemExit:
+        # MachinaClient raises SystemExit on HTTP/connection errors (detail on stderr).
+        if json_output:
+            print(json.dumps({"error": "api request failed"}))
+            raise typer.Exit(1) from None
+        raise
     data = result.get("data", {})
 
     if json_output:

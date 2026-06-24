@@ -47,7 +47,10 @@ def generate(
 
 
 def _mask_key(value: str) -> str:
-    return f"{value[:12]}...{value[-6:]}" if len(value) > 20 else value
+    """Mask an API key for display. Never returns a non-empty value unmasked."""
+    if len(value) > 20:
+        return f"{value[:12]}...{value[-6:]}"
+    return "***" if value else value
 
 
 @app.command("list")
@@ -63,15 +66,25 @@ def list_keys(
     if not project_id:
         project_id = get_config("default_project_id")
     if not project_id:
+        if json_output:
+            print(json.dumps({"error": "project id required"}))
+            raise typer.Exit(1)
         console.print("[red]Project ID required. Set default or use --project.[/red]")
         raise typer.Exit(1)
 
-    result = client.post("system/api/search-key", {
-        "filters": {"project_id": project_id},
-        "sorters": ["name", 1],
-        "page": 1,
-        "page_size": 50,
-    })
+    try:
+        result = client.post("system/api/search-key", {
+            "filters": {"project_id": project_id},
+            "sorters": ["name", 1],
+            "page": 1,
+            "page_size": 50,
+        })
+    except SystemExit:
+        # MachinaClient raises SystemExit on HTTP/connection errors (detail on stderr).
+        if json_output:
+            print(json.dumps({"error": "api request failed"}))
+            raise typer.Exit(1) from None
+        raise
 
     keys = result.get("data", [])
 

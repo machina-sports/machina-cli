@@ -42,15 +42,18 @@ def config_get(
 ):
     """Get a configuration value."""
     value = get_config(key)
+    if value is None:
+        if json_output:
+            print(json.dumps({"key": key, "value": None, "error": "key not found"}))
+            raise typer.Exit(1)
+        console.print(f"[yellow]Key '{key}' not found.[/yellow]")
+        return
     if value and not reveal and _SECRET_KEY.search(key):
         value = "***redacted***"
     if json_output:
         print(json.dumps({"key": key, "value": value}))
         return
-    if value is None:
-        console.print(f"[yellow]Key '{key}' not found.[/yellow]")
-    else:
-        console.print(f"[bold]{key}[/bold] = {value}")
+    console.print(f"[bold]{key}[/bold] = {value}")
 
 
 @app.command("list")
