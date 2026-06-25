@@ -14,6 +14,7 @@ from rich.console import Console
 
 # Single source of truth for the MCP connection contract (verified against
 # machina-core-api + machina-client-api — see mcp.py).
+from machina_cli.client import MachinaClient
 from machina_cli.commands.credentials import _mask_key
 from machina_cli.commands.mcp import _MCP_PATH, _MCP_TRANSPORT, _probe
 from machina_cli.config import get_config, resolve_auth_token
@@ -31,12 +32,43 @@ def _fail(message: str, json_output: bool, extra: Optional[dict] = None):
     raise typer.Exit(1)
 
 
+def _ensure_project_api_key(project_id: str, org_id: str) -> str:
+    """Return a durable project API key (X-Api-Token), reusing the dedicated
+    `sportsclaw-<project>` key if it already exists, otherwise minting one.
+
+    Reuses the same Core API endpoints as `machina credentials`. May raise
+    SystemExit (via MachinaClient) on auth/API failure.
+    """
+    client = MachinaClient()
+    key_name = f"sportsclaw-{project_id}"
+
+    existing = client.post(
+        "system/api/search-key",
+        {"filters": {"project_id": project_id}, "sorters": ["name", 1], "page": 1, "page_size": 50},
+    ).get("data", [])
+    for key in existing:
+        if key.get("name") == key_name and key.get("key"):
+            return key["key"]
+
+    result = client.post(
+        "system/api/generate-key",
+        {
+            "organization_id": org_id,
+            "project_id": project_id,
+            "name": key_name,
+            "level": "SERVICE_ACCESS",
+        },
+    )
+    return result.get("data", {}).get("api_key", "")
+
+
 def run(
     project_id: Optional[str],
     json_output: bool,
     reveal: bool,
     probe: bool,
     name: Optional[str],
+    mint: bool = False,
 ):
     """Resolve and present a project's MCP connection bundle."""
     project_id = project_id or get_config("default_project_id")
@@ -64,6 +96,23 @@ def run(
 
     if probe and not _probe(mcp_url):
         _fail("endpoint not reachable", json_output, {"url": mcp_url})
+
+    # --mint: ensure a durable, dedicated project API key (X-Api-Token) instead of
+    # handing off whatever ambient credential the user happens to have.
+    if mint:
+        org_id = get_config("default_organization_id")
+        if not org_id:
+            _fail("organization required to mint an api key (set a default org)", json_output)
+        try:
+            minted = _ensure_project_api_key(project_id, org_id)
+        except SystemExit:
+            if json_output:
+                print(json.dumps({"error": "could not mint api key"}))
+                raise typer.Exit(1) from None
+            raise
+        if not minted:
+            _fail("api key minting returned no key", json_output)
+        header_name, token = "X-Api-Token", minted
 
     if json_output:
         print(
@@ -93,8 +142,8 @@ def run(
     if header_name != "X-Api-Token":
         console.print(
             "\n[yellow]Note:[/yellow] this is a session token (expires). For a durable "
-            "connection use an API key: set [bold]MACHINA_API_KEY[/bold] or run "
-            "[bold]machina credentials generate[/bold]."
+            "connection re-run with [bold]--mint[/bold] to use a dedicated project API key "
+            "(or set [bold]MACHINA_API_KEY[/bold])."
         )
 
     console.print("\n[dim]Register with sportsclaw:[/dim]")

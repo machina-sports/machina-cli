@@ -113,3 +113,72 @@ def test_connect_json_probe_failure_errors():
         result = runner.invoke(app, ["connect", "proj_1", "--json", "--probe"])
     assert result.exit_code == 1
     assert json.loads(result.output) == {"error": "endpoint not reachable", "url": _MCP_URL}
+
+
+# --- --mint -----------------------------------------------------------------
+
+
+def _mint_client(search_data, generated_key="sk-minted-0987654321zzz"):
+    """MachinaClient mock: search-key returns search_data, generate-key returns a key."""
+    client = MagicMock()
+
+    def _post(path, payload=None):
+        if path == "system/api/search-key":
+            return {"data": search_data}
+        if path == "system/api/generate-key":
+            return {"data": {"api_key": generated_key}}
+        return {"data": {}}
+
+    client.return_value.post.side_effect = _post
+    return client
+
+
+def test_connect_mint_generates_key_when_absent():
+    # session token + --mint + no existing sportsclaw key -> generate one
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="proj_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "session-jwt"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=[])),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal", "--mint"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["auth_header"] == "X-Api-Token"
+    assert payload["token"] == "sk-minted-0987654321zzz"
+
+
+def test_connect_mint_reuses_existing_key():
+    existing = [{"name": "sportsclaw-proj_1", "_id": "k1", "key": "sk-existing-1122334455xx"}]
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="proj_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "session-jwt"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=existing)),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal", "--mint"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["token"] == "sk-existing-1122334455xx"
+
+
+def test_connect_mint_requires_org():
+    # get_config returns "" for default_organization_id -> mint cannot proceed
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value=""),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "session-jwt"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--mint"])
+    assert result.exit_code == 1
+    assert json.loads(result.output) == {
+        "error": "organization required to mint an api key (set a default org)"
+    }
