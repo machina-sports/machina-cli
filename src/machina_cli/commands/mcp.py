@@ -18,13 +18,15 @@ from machina_cli.project_client import ProjectClient
 app = typer.Typer(help="Resolve Machina MCP connection details")
 console = Console()
 
-# The MCP server is provisioned per project at the Client-API base + this path,
-# served over SSE and authenticated with the same token as the Client API.
-# NOTE (issue #20, D1): confirm with the platform whether the premium endpoint is
-# the tenant-project pod ({api_claim}/mcp/sse) or the org-client deployment
-# ({org_domain}/mcp/sse) before treating these as a frozen contract. Both paths
-# exist in machina-core-api; this resolver assumes the project pod. Changing it is
-# a one-line edit here.
+# The MCP server is provisioned at the Client-API base (the project-token JWT `api`
+# claim) + this path, served over SSE, authenticated with X-Api-Token or
+# X-Session-Token (X-Project-Token is NOT required).
+# Verified against machina-core-api + machina-client-api (issue #20, D1): the host
+# comes from the `api` claim (standard host or a custom address_client_domain), and
+# the "/mcp/sse" path is identical across both tenant-project and org-client
+# deployments. It matches the backend's own SPORTSCLAW_MCP_SERVERS derivation
+# (core-api tenant_project/deployment.py). Residual: an org-client-deployed project
+# whose `api` claim host differs from its MCP host — `--probe` catches that.
 _MCP_PATH = "/mcp/sse"
 _MCP_TRANSPORT = "sse"
 _MCP_AUTH_HEADER = "X-Api-Token"
