@@ -32,19 +32,21 @@ _MCP_TRANSPORT = "sse"
 _MCP_AUTH_HEADER = "X-Api-Token"
 
 
-def _probe(mcp_url: str) -> bool:
+def _probe(mcp_url: str, auth: Optional[tuple] = None) -> bool:
     """Best-effort reachability check for the MCP SSE endpoint.
 
-    Opens the SSE stream with the current auth token and accepts only a 200 with
-    an event-stream content type. This confirms a reachable SSE endpoint, not full
-    MCP protocol conformance. Any failure (non-200, wrong content type, auth error,
-    connection error) returns False so callers fail loud rather than handing out an
-    unverified URL.
+    Opens the SSE stream and accepts only a 200 with an event-stream content type.
+    This confirms a reachable SSE endpoint, not full MCP protocol conformance. Any
+    failure (non-200, wrong content type, auth error, connection error) returns
+    False so callers fail loud rather than handing out an unverified URL.
+
+    `auth` is an optional (header_name, token) pair to test the exact credential a
+    caller will hand off; when omitted the ambient resolve_auth_token() is used.
     """
     import httpx
 
     headers = {"Accept": "text/event-stream"}
-    header_name, token = resolve_auth_token()
+    header_name, token = auth if auth is not None else resolve_auth_token()
     if header_name and token:
         headers[header_name] = token
     try:
@@ -62,9 +64,7 @@ def url(
         None, help="Project ID (defaults to the selected project)"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
-    probe: bool = typer.Option(
-        False, "--probe", help="Verify the SSE endpoint is reachable"
-    ),
+    probe: bool = typer.Option(False, "--probe", help="Verify the SSE endpoint is reachable"),
 ):
     """Resolve a project's MCP endpoint (URL, transport, auth header)."""
     project_id = project_id or get_config("default_project_id")
