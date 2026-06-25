@@ -31,11 +31,13 @@ _MCP_AUTH_HEADER = "X-Api-Token"
 
 
 def _probe(mcp_url: str) -> bool:
-    """Best-effort check that the URL is a reachable MCP SSE endpoint.
+    """Best-effort reachability check for the MCP SSE endpoint.
 
     Opens the SSE stream with the current auth token and accepts only a 200 with
-    an event-stream content type. Any failure returns False so callers fail loud
-    rather than handing out an unverified URL.
+    an event-stream content type. This confirms a reachable SSE endpoint, not full
+    MCP protocol conformance. Any failure (non-200, wrong content type, auth error,
+    connection error) returns False so callers fail loud rather than handing out an
+    unverified URL.
     """
     import httpx
 
@@ -59,7 +61,7 @@ def url(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     probe: bool = typer.Option(
-        False, "--probe", help="Verify the endpoint is reachable and speaks MCP"
+        False, "--probe", help="Verify the SSE endpoint is reachable"
     ),
 ):
     """Resolve a project's MCP endpoint (URL, transport, auth header)."""
@@ -82,29 +84,41 @@ def url(
             raise typer.Exit(1) from None
         raise
 
+    if not client.api_url:
+        # A stored project token without an `api` claim yields an empty base; emitting
+        # "/mcp/sse" would hand out a silently broken URL.
+        if json_output:
+            print(json.dumps({"error": "project has no client-api address"}))
+            raise typer.Exit(1)
+        console.print("[red]Project has no Client-API address; cannot resolve MCP endpoint.[/red]")
+        raise typer.Exit(1)
+
     mcp_url = f"{client.api_url}{_MCP_PATH}"
-    reachable = _probe(mcp_url) if probe else None
+
+    if probe and not _probe(mcp_url):
+        # Failure uses the same {"error": ...} envelope + non-zero exit as the rest of
+        # the CLI; success is signalled by the normal payload and exit 0.
+        if json_output:
+            print(json.dumps({"error": "endpoint not reachable", "url": mcp_url}))
+        else:
+            console.print(f"[red]MCP endpoint not reachable: {mcp_url}[/red]")
+        raise typer.Exit(1)
 
     if json_output:
-        payload = {
-            "project_id": project_id,
-            "url": mcp_url,
-            "transport": _MCP_TRANSPORT,
-            "auth_header": _MCP_AUTH_HEADER,
-        }
-        if probe:
-            payload["reachable"] = reachable
-        print(json.dumps(payload))
-        if probe and not reachable:
-            raise typer.Exit(1)
+        print(
+            json.dumps(
+                {
+                    "project_id": project_id,
+                    "url": mcp_url,
+                    "transport": _MCP_TRANSPORT,
+                    "auth_header": _MCP_AUTH_HEADER,
+                }
+            )
+        )
         return
 
     console.print(f"[bold]MCP URL:[/bold] {mcp_url}")
     console.print(f"[bold]Transport:[/bold] {_MCP_TRANSPORT}")
     console.print(f"[bold]Auth header:[/bold] {_MCP_AUTH_HEADER}")
     if probe:
-        if reachable:
-            console.print("[green]Endpoint reachable.[/green]")
-        else:
-            console.print("[red]Endpoint not reachable or not an MCP server.[/red]")
-            raise typer.Exit(1)
+        console.print("[green]Endpoint reachable.[/green]")
