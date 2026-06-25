@@ -17,11 +17,32 @@ console = Console()
 
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
-    "org", "project", "workflow", "agent", "connector",
-    "mapping", "prompt", "document", "skills", "sports", "factory",
-    "template", "execution", "credentials", "deploy", "config", "auth",
-    "login", "update", "version",
-    "help", "exit", "quit", "clear",
+    "org",
+    "project",
+    "workflow",
+    "agent",
+    "connector",
+    "mapping",
+    "prompt",
+    "document",
+    "skills",
+    "sports",
+    "factory",
+    "template",
+    "execution",
+    "credentials",
+    "deploy",
+    "config",
+    "auth",
+    "mcp",
+    "connect",
+    "login",
+    "update",
+    "version",
+    "help",
+    "exit",
+    "quit",
+    "clear",
 ]
 
 # Sub-commands for tab completion
@@ -38,13 +59,36 @@ SUB_COMMANDS = {
     # `sports` is a dynamic passthrough to sports-skills; tab completion only
     # offers the currently-registered top-level modules.
     "sports": [
-        "football", "f1", "nfl", "nba", "wnba", "nhl", "mlb", "tennis",
-        "cfb", "cbb", "golf", "volleyball", "polymarket", "kalshi", "betting",
-        "markets", "metadata", "news", "catalog",
+        "football",
+        "f1",
+        "nfl",
+        "nba",
+        "wnba",
+        "nhl",
+        "mlb",
+        "tennis",
+        "cfb",
+        "cbb",
+        "golf",
+        "volleyball",
+        "polymarket",
+        "kalshi",
+        "betting",
+        "markets",
+        "metadata",
+        "news",
+        "catalog",
     ],
     "factory": [
-        "run", "status", "watch", "logs", "follow-up",
-        "cancel", "open-pr", "list", "whoami",
+        "run",
+        "status",
+        "watch",
+        "logs",
+        "follow-up",
+        "cancel",
+        "open-pr",
+        "list",
+        "whoami",
     ],
     "template": ["list", "install", "push"],
     "execution": ["get", "list"],
@@ -52,6 +96,7 @@ SUB_COMMANDS = {
     "deploy": ["start", "status", "restart"],
     "config": ["list", "set", "get"],
     "auth": ["login", "logout", "whoami"],
+    "mcp": ["url"],
 }
 
 
@@ -111,7 +156,9 @@ def _show_repl_banner():
 
     _, token = resolve_auth_token()
     if token:
-        org_name = get_config("default_organization_name") or get_config("default_organization_id") or ""
+        org_name = (
+            get_config("default_organization_name") or get_config("default_organization_id") or ""
+        )
         proj_name = get_config("default_project_name") or get_config("default_project_id") or ""
         if org_name:
             console.print(f"  [dim]Organization:[/dim] [bold]{org_name}[/bold]")
@@ -129,36 +176,50 @@ def _show_repl_banner():
 def _show_help():
     """Show REPL help."""
     groups = [
-        ("Platform", [
-            ("org list|create|use", "Organizations"),
-            ("project list|create|use|status", "Projects"),
-            ("credentials list|generate|revoke", "API keys"),
-            ("auth login|logout|whoami", "Authentication"),
-        ]),
-        ("Resources", [
-            ("workflow list|get|run <name>", "Workflows"),
-            ("agent list|get|run <name>", "Agents"),
-            ("connector list|get <name>", "Connectors"),
-            ("mapping list|get <name>", "Mappings"),
-            ("prompt list|get <name>", "Prompts"),
-            ("document list|get <id>", "Documents"),
-        ]),
-        ("Operations", [
-            ("execution list|get <id>", "Execution history"),
-            ("skills list|install|info|run|push|constructor", "Skills-first surface"),
-            ("factory run|status|watch|logs|list", "Build apps (Factory coding-agent)"),
-            ("sports <module> <command>", "Sports-skills passthrough"),
-            ("template list|install|push", "Template compatibility surface"),
-            ("deploy start|status|restart", "Deployments"),
-            ("config list|set|get", "Configuration"),
-        ]),
-        ("Session", [
-            ("login", "Authenticate (browser)"),
-            ("update", "Self-update the CLI"),
-            ("version", "Show CLI version"),
-            ("clear", "Clear screen"),
-            ("exit", "Exit session"),
-        ]),
+        (
+            "Platform",
+            [
+                ("org list|create|use", "Organizations"),
+                ("project list|create|use|status", "Projects"),
+                ("credentials list|generate|revoke", "API keys"),
+                ("auth login|logout|whoami", "Authentication"),
+                ("connect [project] --mint", "Wire an agent to a project's MCP"),
+            ],
+        ),
+        (
+            "Resources",
+            [
+                ("workflow list|get|run <name>", "Workflows"),
+                ("agent list|get|run <name>", "Agents"),
+                ("connector list|get <name>", "Connectors"),
+                ("mapping list|get <name>", "Mappings"),
+                ("prompt list|get <name>", "Prompts"),
+                ("document list|get <id>", "Documents"),
+            ],
+        ),
+        (
+            "Operations",
+            [
+                ("execution list|get <id>", "Execution history"),
+                ("skills list|install|info|run|push|constructor", "Skills-first surface"),
+                ("factory run|status|watch|logs|list", "Build apps (Factory coding-agent)"),
+                ("sports <module> <command>", "Sports-skills passthrough"),
+                ("template list|install|push", "Template compatibility surface"),
+                ("deploy start|status|restart", "Deployments"),
+                ("config list|set|get", "Configuration"),
+                ("mcp url [project]", "Resolve MCP endpoint"),
+            ],
+        ),
+        (
+            "Session",
+            [
+                ("login", "Authenticate (browser)"),
+                ("update", "Self-update the CLI"),
+                ("version", "Show CLI version"),
+                ("clear", "Clear screen"),
+                ("exit", "Exit session"),
+            ],
+        ),
     ]
     console.print()
     for group_name, cmds in groups:
@@ -213,10 +274,24 @@ def _dispatch(line: str):
     # This lets users type `workflow list limit 50` instead of `workflow list --limit 50`
     # Only apply AFTER the subcommand (first 2 args are command + subcommand)
     KNOWN_FLAGS = {
-        "limit", "page", "json", "compact", "sync", "watch",
-        "show-keys", "copy", "repo", "branch", "private", "force",
-        "api-key", "with-credentials", "username", "password",
-        "slug", "level",
+        "limit",
+        "page",
+        "json",
+        "compact",
+        "sync",
+        "watch",
+        "show-keys",
+        "copy",
+        "repo",
+        "branch",
+        "private",
+        "force",
+        "api-key",
+        "with-credentials",
+        "username",
+        "password",
+        "slug",
+        "level",
     }
     # Find where flags start (skip command words like "project list", "workflow get")
     flag_start = min(2, len(args))

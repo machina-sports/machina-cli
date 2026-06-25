@@ -7,6 +7,7 @@ URL. The token is masked by default; pass --reveal (or --json --reveal) to emit 
 """
 
 import json
+import re
 from typing import Optional
 
 import typer
@@ -22,6 +23,15 @@ from machina_cli.project_client import ProjectClient
 
 console = Console()
 
+# sportsclaw server names must match ^[a-zA-Z0-9_-]+$.
+_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _safe_name(value: str) -> str:
+    """Coerce a value into a sportsclaw-acceptable server name."""
+    cleaned = _NAME_UNSAFE.sub("-", value).strip("-")
+    return cleaned or "machina"
+
 
 def _fail(message: str, json_output: bool, extra: Optional[dict] = None):
     """Emit an error (JSON envelope or console) and exit non-zero."""
@@ -32,23 +42,33 @@ def _fail(message: str, json_output: bool, extra: Optional[dict] = None):
     raise typer.Exit(1)
 
 
-def _ensure_project_api_key(project_id: str, org_id: str) -> str:
+def _ensure_project_api_key(project_id: str, org_id: str, json_output: bool) -> str:
     """Return a durable project API key (X-Api-Token), reusing the dedicated
     `sportsclaw-<project>` key if it already exists, otherwise minting one.
 
-    Reuses the same Core API endpoints as `machina credentials`. May raise
-    SystemExit (via MachinaClient) on auth/API failure.
+    Filters server-side by name so the lookup is page-independent, and refuses to
+    mint a duplicate when the named key already exists but its value is unavailable.
+    Reuses the same Core API endpoints as `machina credentials`. May raise SystemExit
+    (via MachinaClient) on auth/API failure.
     """
     client = MachinaClient()
     key_name = f"sportsclaw-{project_id}"
 
     existing = client.post(
         "system/api/search-key",
-        {"filters": {"project_id": project_id}, "sorters": ["name", 1], "page": 1, "page_size": 50},
+        {"filters": {"project_id": project_id, "name": key_name}, "page": 1, "page_size": 10},
     ).get("data", [])
-    for key in existing:
-        if key.get("name") == key_name and key.get("key"):
-            return key["key"]
+    if existing:
+        value = existing[0].get("key")
+        if value:
+            return value
+        # Named key exists but its value isn't retrievable — minting again would
+        # sprawl duplicates, so stop and let the user resolve it explicitly.
+        _fail(
+            f"a '{key_name}' api key already exists but its value is unavailable; "
+            "revoke it with `machina credentials` or pass an existing token",
+            json_output,
+        )
 
     result = client.post(
         "system/api/generate-key",
@@ -69,6 +89,7 @@ def run(
     probe: bool,
     name: Optional[str],
     mint: bool = False,
+    org: Optional[str] = None,
 ):
     """Resolve and present a project's MCP connection bundle."""
     project_id = project_id or get_config("default_project_id")
@@ -92,19 +113,20 @@ def run(
         _fail("project has no client-api address", json_output)
 
     mcp_url = f"{client.api_url}{_MCP_PATH}"
-    server_name = name or project_id
-
-    if probe and not _probe(mcp_url):
-        _fail("endpoint not reachable", json_output, {"url": mcp_url})
+    server_name = name or _safe_name(project_id)
 
     # --mint: ensure a durable, dedicated project API key (X-Api-Token) instead of
-    # handing off whatever ambient credential the user happens to have.
+    # handing off whatever ambient credential the user happens to have. Done before
+    # the probe so reachability is checked with the credential actually emitted.
     if mint:
-        org_id = get_config("default_organization_id")
+        org_id = org or get_config("default_organization_id")
         if not org_id:
-            _fail("organization required to mint an api key (set a default org)", json_output)
+            _fail(
+                "organization required to mint an api key (set a default org or pass --org)",
+                json_output,
+            )
         try:
-            minted = _ensure_project_api_key(project_id, org_id)
+            minted = _ensure_project_api_key(project_id, org_id, json_output)
         except SystemExit:
             if json_output:
                 print(json.dumps({"error": "could not mint api key"}))
@@ -114,6 +136,11 @@ def run(
             _fail("api key minting returned no key", json_output)
         header_name, token = "X-Api-Token", minted
 
+    if probe and not _probe(mcp_url, (header_name, token)):
+        _fail("endpoint not reachable", json_output, {"url": mcp_url})
+
+    durable = header_name == "X-Api-Token"
+
     if json_output:
         print(
             json.dumps(
@@ -122,8 +149,11 @@ def run(
                     "url": mcp_url,
                     "transport": _MCP_TRANSPORT,
                     "auth_header": header_name,
-                    "token": token if reveal else _mask_key(token),
+                    # null (not the masked preview) unless --reveal, so a script can
+                    # never mistake a redacted string for a usable credential.
+                    "token": token if reveal else None,
                     "masked": not reveal,
+                    "durable": durable,
                 }
             )
         )

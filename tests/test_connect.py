@@ -42,10 +42,11 @@ def test_connect_json_reveal_emits_full_bundle():
         "auth_header": "X-Api-Token",
         "token": _TOKEN,
         "masked": False,
+        "durable": True,
     }
 
 
-def test_connect_json_masks_token_by_default():
+def test_connect_json_token_null_when_not_revealed():
     p1, p2, p3 = _patches()
     with p1, p2, p3:
         result = runner.invoke(app, ["connect", "proj_1", "--json"])
@@ -53,7 +54,16 @@ def test_connect_json_masks_token_by_default():
     payload = json.loads(result.output)
     assert _TOKEN not in result.output
     assert payload["masked"] is True
-    assert payload["token"] == "sk-123456789...efghij"
+    # token is null (not a masked preview) so a script can't use a redacted string
+    assert payload["token"] is None
+
+
+def test_connect_json_durable_false_for_session_token():
+    p1, p2, p3 = _patches(header="X-Session-Token")
+    with p1, p2, p3:
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["durable"] is False
 
 
 def test_connect_name_override():
@@ -180,5 +190,128 @@ def test_connect_mint_requires_org():
         result = runner.invoke(app, ["connect", "proj_1", "--json", "--mint"])
     assert result.exit_code == 1
     assert json.loads(result.output) == {
-        "error": "organization required to mint an api key (set a default org)"
+        "error": "organization required to mint an api key (set a default org or pass --org)"
     }
+
+
+def test_connect_mint_sends_correct_generate_payload():
+    captured = {}
+
+    client = MagicMock()
+
+    def _post(path, payload=None):
+        if path == "system/api/search-key":
+            return {"data": []}
+        if path == "system/api/generate-key":
+            captured["payload"] = payload
+            return {"data": {"api_key": "sk-minted-0987654321zzz"}}
+        return {"data": {}}
+
+    client.return_value.post.side_effect = _post
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="org_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "s"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", client),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal", "--mint"])
+    assert result.exit_code == 0
+    assert captured["payload"] == {
+        "organization_id": "org_1",
+        "project_id": "proj_1",
+        "name": "sportsclaw-proj_1",
+        "level": "SERVICE_ACCESS",
+    }
+
+
+def test_connect_mint_json_masks_minted_token_without_reveal():
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="org_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "s"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=[])),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--mint"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["token"] is None
+    assert payload["masked"] is True
+    assert payload["durable"] is True
+    assert "sk-minted-0987654321zzz" not in result.output
+
+
+def test_connect_mint_refuses_duplicate_when_value_unavailable():
+    search = [{"name": "sportsclaw-proj_1", "_id": "k1", "key": ""}]
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="org_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "s"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=search)),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal", "--mint"])
+    assert result.exit_code == 1
+    assert "already exists but its value is unavailable" in json.loads(result.output)["error"]
+
+
+def test_connect_mint_org_flag_supplies_org():
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value=""),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "s"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=[])),
+    ):
+        result = runner.invoke(
+            app, ["connect", "proj_1", "--json", "--reveal", "--mint", "--org", "org_xyz"]
+        )
+    assert result.exit_code == 0
+    assert json.loads(result.output)["token"] == "sk-minted-0987654321zzz"
+
+
+def test_connect_probe_success_emits_bundle():
+    p1, p2, p3 = _patches()
+    with p1, p2, p3, patch("machina_cli.commands.connect._probe", return_value=True):
+        result = runner.invoke(app, ["connect", "proj_1", "--json", "--reveal", "--probe"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["url"] == _MCP_URL
+
+
+def test_connect_console_mint_no_session_warning():
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="org_1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Session-Token", "s"),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.connect.MachinaClient", _mint_client(search_data=[])),
+    ):
+        result = runner.invoke(app, ["connect", "proj_1", "--mint"])
+    assert result.exit_code == 0
+    assert "session token" not in result.output.lower()  # mint -> X-Api-Token
+    assert "sk-minted-0987654321zzz" not in result.output  # masked in console
+
+
+def test_connect_sanitizes_unsafe_project_name():
+    with (
+        patch("machina_cli.commands.connect.get_config", return_value="org.proj:1"),
+        patch(
+            "machina_cli.commands.connect.resolve_auth_token",
+            return_value=("X-Api-Token", _TOKEN),
+        ),
+        patch("machina_cli.commands.connect.ProjectClient", _mock_project_client()),
+    ):
+        result = runner.invoke(app, ["connect", "org.proj:1", "--json", "--reveal"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["name"] == "org-proj-1"

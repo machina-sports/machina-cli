@@ -208,9 +208,10 @@ def connect_command(
     probe: bool = typer.Option(False, "--probe", help="Verify the SSE endpoint is reachable"),
     name: str = typer.Option(None, "--name", "-n", help="Server name for the agent (defaults to project id)"),
     mint: bool = typer.Option(False, "--mint", help="Reuse or create a dedicated project API key for a durable connection"),
+    org: str = typer.Option(None, "--org", "-o", help="Organization ID for --mint (defaults to the selected org)"),
 ):
     """Resolve a project's MCP connection for an external agent (e.g. sportsclaw)."""
-    connect.run(project_id, json_output, reveal, probe, name, mint)
+    connect.run(project_id, json_output, reveal, probe, name, mint, org)
 
 
 @app.command()
