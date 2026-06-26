@@ -18,7 +18,7 @@ console = Console()
 # Commands available in the REPL (maps to typer subcommands)
 REPL_COMMANDS = [
     "org", "project", "workflow", "agent", "connector",
-    "mapping", "prompt", "document", "skills", "sports", "factory",
+    "mapping", "prompt", "document", "skills", "sports", "loop", "factory",
     "template", "execution", "credentials", "deploy", "config", "auth",
     "login", "update", "version",
     "help", "exit", "quit", "clear",
@@ -42,6 +42,7 @@ SUB_COMMANDS = {
         "cfb", "cbb", "golf", "volleyball", "polymarket", "kalshi", "betting",
         "markets", "metadata", "news", "catalog",
     ],
+    "loop": ["run", "watch", "say", "stop", "sessions"],
     "factory": [
         "run", "status", "watch", "logs", "follow-up",
         "cancel", "open-pr", "list", "whoami",
