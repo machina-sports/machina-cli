@@ -30,6 +30,9 @@ features:
   - icon: 🏭
     title: Factory builds
     details: Drive the Machina Factory coding-agent — build an app from a prompt, wire it to your data, and open a pull request.
+  - icon: 🔁
+    title: Durable agentic loop
+    details: Run a verified, resumable agentic loop server-side — `machina loop run "…" --watch`. Every turn is persisted and independently checked (gate + evaluator) before it finalizes.
   - icon: ⚽
     title: Sports data
     details: The full sports-skills CLI mounted under `machina sports` — football, F1, NBA, markets and more, delegated live.
@@ -61,6 +64,6 @@ machina workflow list
 | --- | --- |
 | **Platform** | `login` · `org` · `project` · `credentials` |
 | **Resources** | `workflow` · `agent` · `connector` · `mapping` · `prompt` · `document` |
-| **Operations** | `execution` · `skills` · `factory` · `sports` · `template` · `deploy` · `config` · `update` |
+| **Operations** | `execution` · `skills` · `factory` · `loop` · `sports` · `template` · `deploy` · `config` · `update` |
 
 New here? Start with [Installation](/guide/installation), then the [Quickstart](/guide/quickstart).
