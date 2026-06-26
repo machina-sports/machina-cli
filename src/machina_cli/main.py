@@ -10,7 +10,7 @@ from machina_cli import __version__
 from machina_cli.commands import (
     auth, org, project, credentials, deploy, config_cmd,
     workflow, agent, template, execution, skills,
-    connector, mapping, prompt, document, sports, factory, mcp, connect,
+    connector, mapping, prompt, document, sports, factory, loop, mcp, connect,
 )
 from machina_cli.commands.auth import do_login
 
@@ -35,6 +35,7 @@ CMD_GROUPS = [
     ("Operations", [
         ("execution", "Executions"),
         ("skills", "Skills"),
+        ("loop", "Agentic turn loop (harness)"),
         ("factory", "Build apps (Factory)"),
         ("sports", "Sports-skills passthrough"),
         ("template", "Templates (compat)"),
@@ -141,6 +142,7 @@ app.add_typer(agent.app, name="agent", help="Agent management")
 app.add_typer(template.app, name="template", help="Template management")
 app.add_typer(skills.app, name="skills", help="Skills management")
 app.add_typer(execution.app, name="execution", help="Execution management")
+app.add_typer(loop.app, name="loop", help="Durable agentic turn loop (harness)")
 app.add_typer(factory.app, name="factory", help="Trigger Factory coding-agent builds")
 app.add_typer(connector.app, name="connector", help="Connector management")
 app.add_typer(mapping.app, name="mapping", help="Mapping management")

@@ -27,6 +27,7 @@ REPL_COMMANDS = [
     "document",
     "skills",
     "sports",
+    "loop",
     "factory",
     "template",
     "execution",
@@ -79,6 +80,7 @@ SUB_COMMANDS = {
         "news",
         "catalog",
     ],
+    "loop": ["run", "watch", "say", "stop", "sessions"],
     "factory": [
         "run",
         "status",

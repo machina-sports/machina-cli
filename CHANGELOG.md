@@ -2,6 +2,15 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.3.0] - 2026-06-26
+
+### Added
+- **`machina loop …`**: drive a durable agentic turn loop (harness) that runs server-side on Studio primitives, with the CLI as a thin driver/observer (same pattern as `machina factory`). Commands: `run`, `watch`, `say`, `stop`, `sessions`.
+  - **Durable**: the loop is a scheduled agent + `harness_session` documents; each turn is persisted before advancing, and the beat resumes a session left `active` (survives crash / async tool / awaiting input). A turn ends at `idle` (awaiting the next `say`).
+  - **Multi-turn**: `say` injects a follow-up; prior conversation is fed back to the model. `watch` is turn-aware and streams new turns (incl. `→ tool` / `← result` steps).
+  - Server-side resources (prompt/workflow/agent) live in the project's Studio; the CLI reuses the existing project session — no new credential.
+  - Architecture + chapter-by-chapter build (caps 1–7) and verified platform contracts: `docs/agentic-harness-loop.md`. Dynamic multi-tool dispatcher reference: `docs/loop-tools-connector.py`.
+
 ## [0.2.27] - 2026-06-25
 
 ### Added
