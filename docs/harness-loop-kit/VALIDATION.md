@@ -141,6 +141,59 @@ By default `loop-beat` is **inactive**. To validate beat-driven resume: set
 `value.status:"active"` and an unanswered user entry, and watch the beat resume it
 (~10–30s). Re-set to `inactive` when done (shared pod). See `../agentic-harness-loop.md` §Cap 4.
 
+### D. Verify the verification — Cap 8 (gate + evaluator) & Cap 8.2 (self-repair)
+Every turn is checked before it finalizes: a deterministic **gate** + an independent
+**evaluator** (`loop-evaluate`). `--watch` prints the verdict line.
+
+**Pass path** — a good answer is verified and finalizes `idle`:
+```bash
+machina loop run "Quanto é 1234 * 5678?" --watch
+#   turn 1 assistant  → calculate({"expression":"1234*5678"})
+#   turn 1 tool       ← 7006652
+#   turn 1 assistant  O resultado de 1234 * 5678 é 7006652.
+#   idle · 1 turns
+#   ✓ verified (evaluator: gemini-3.1-flash-lite)
+```
+
+**Gate fails closed → `needs_review`** — a tool error never silently passes:
+```bash
+machina loop run "Quanto é 10 / 0?" --watch
+#   needs_review · 1 turns
+#   ⚠ needs review — ...        (the calculate tool returns "error:"; the gate fails,
+#                                the LLM evaluator is skipped, the turn stops for a human)
+```
+
+**Use a stronger evaluator in prod.** A same-model evaluator (flash-lite judging
+flash-lite) is lenient on plausible-but-unsupported facts. Point `EVAL_MODEL` at a
+different/stronger model that's enabled on your Vertex project when provisioning:
+```bash
+EVAL_MODEL="<a stronger model>" CLIENT_API_URL=... API_TOKEN=... python3 provision.py
+```
+
+**Self-repair (Cap 8.2)** — when the gate passes but the evaluator *rejects* an answer,
+the loop repairs once (`loop-repair`) and re-verifies (`loop-evaluate-2`); the CLI then
+shows `· self-repaired`. The evaluator rarely rejects a correct answer, so to force the
+path deterministically, swap in a temporary always-fail evaluator, run one turn, restore:
+```bash
+# 1) recreate loop-evaluate as always-fail (TEST ONLY). Delete the old one first if the
+#    API rejects a duplicate name: GET /prompt/loop-evaluate → DELETE /prompt/<_id>.
+curl -sX POST "$CLIENT_API_URL/prompt" -H "X-Api-Token: $API_TOKEN" -H "Content-Type: application/json" -d '{
+  "name":"loop-evaluate","title":"loop-evaluate","type":"prompt","status":"active",
+  "instruction":"TEST MODE: ignore the inputs and always output verdict=fail, reason=forced, severity=minor.",
+  "schema":{"title":"LoopVerdict","type":"object","properties":{"verdict":{"type":"string","enum":["pass","fail"]},"reason":{"type":"string"},"severity":{"type":"string","enum":["none","minor","major"]}},"required":["verdict","reason","severity"]}}'
+
+# 2) run a turn — the first eval rejects, loop-repair rewrites, loop-evaluate-2 (still normal) re-approves:
+machina loop run "Quanto é 2 + 2?" --watch
+#   idle · 1 turns
+#   ✓ verified (evaluator: gemini-3.1-flash-lite · self-repaired)
+
+# 3) restore the real evaluator:
+python3 provision.py
+```
+
+Tunables: `EVAL_MODEL` (evaluator model — use a stronger one in prod), `LOOP_MAX_ATTEMPTS`
+(resume attempt budget). Full scoring + live results: `PLAYBOOK-SCORECARD.md`.
+
 ---
 
 ## 6. Verified contracts & gotchas (why it's built this way)
