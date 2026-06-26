@@ -11,6 +11,22 @@ All notable changes to machina-cli are documented here.
   - Server-side resources (prompt/workflow/agent) live in the project's Studio; the CLI reuses the existing project session — no new credential.
   - Architecture + chapter-by-chapter build (caps 1–7) and verified platform contracts: `docs/agentic-harness-loop.md`. Dynamic multi-tool dispatcher reference: `docs/loop-tools-connector.py`.
 
+## [0.2.27] - 2026-06-25
+
+### Added
+- **`machina connect [project]`**: one-command MCP connection bundle for external agents (e.g. sportsclaw) — emits `{name, url, transport, auth_header, token, masked, durable}` so an agent can register a Machina MCP server with no hand-pasted URL. Token is masked by default; `--reveal` emits it (in `--json`, `token` is `null` unless `--reveal`, so a script can't mistake a redacted string for a credential). `--mint` reuses or creates a dedicated `sportsclaw-<project>` project API key for a durable connection (refuses to mint a duplicate); `--org` supplies the organization inline; `--probe` checks reachability with the credential actually emitted.
+- **`machina mcp url [project]`**: resolve a project's MCP endpoint (`{client-api}/mcp/sse`, SSE transport, `X-Api-Token`/`X-Session-Token` auth) from the project-token JWT `api` claim. `--probe` verifies the SSE endpoint is reachable and fails loud on a wrong derivation; `--json` for machine output. Verified against machina-core-api + machina-client-api.
+- **`--json` on identity/config/deploy commands**: `whoami`, `config get`, `config list`, `deploy status`, and `credentials list` now emit machine-readable JSON. Error paths use a consistent `{"error": ...}` envelope with a non-zero exit.
+- **`docs/credentials.md`**: documents `~/.machina/config.json` + `credentials.json` as a stable integration contract (fields, mode `600`, env overrides, `resolve_auth_token` precedence) so other tools can read it for unified, one-time login.
+- REPL: `mcp` and `connect` added to the command list, tab-completion, and help.
+
+### Changed
+- **Secret redaction**: `config list` masks secret-looking keys; `config get <secret>` masks by default with `--reveal` to opt in. `credentials list` key masking is fail-safe — a short key is never echoed verbatim, and the JSON `masked` flag is honest.
+
+### Fixed
+- `config get --json` now signals a missing key (`{"error": "key not found"}` + exit 1) instead of `value: null` with exit 0.
+- `deploy status` and `credentials list` in `--json` mode emit a JSON error envelope on API failure instead of no output.
+
 ## [0.2.26] - 2026-05-31
 
 ### Changed

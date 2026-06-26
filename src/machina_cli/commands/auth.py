@@ -1,5 +1,6 @@
 """Authentication commands: login, logout, whoami."""
 
+import json
 from typing import Optional
 
 import typer
@@ -193,19 +194,42 @@ def clear_session():
 
 
 @app.command()
-def whoami():
+def whoami(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
     """Show current authenticated user info."""
     header_name, token = resolve_auth_token()
 
     if not token:
-        console.print("[yellow]Not authenticated. Run `machina login` first.[/yellow]")
+        if json_output:
+            print(json.dumps({"authenticated": False, "error": "not authenticated"}))
+        else:
+            console.print("[yellow]Not authenticated. Run `machina login` first.[/yellow]")
         raise typer.Exit(1)
 
     client = MachinaClient()
-    result = client.get("login/session")
+    try:
+        result = client.get("login/session")
+    except SystemExit:
+        # MachinaClient raises SystemExit on HTTP/connection errors (detail on stderr);
+        # in --json mode surface a parseable error on stdout instead of swallowing it.
+        if json_output:
+            print(json.dumps({"authenticated": False, "error": "session lookup failed"}))
+            raise typer.Exit(1) from None
+        raise
     user_data = result.get("data", {})
 
     auth_method = "API Key" if header_name == "X-Api-Token" else "Session Token"
+
+    if json_output:
+        print(json.dumps({
+            "authenticated": True,
+            "name": user_data.get("name"),
+            "email": user_data.get("email"),
+            "user_id": user_data.get("_id", user_data.get("id")),
+            "auth_method": auth_method,
+        }))
+        return
 
     console.print(Panel.fit(
         f"[bold]Name:[/bold] {user_data.get('name', 'N/A')}\n"
