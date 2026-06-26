@@ -703,10 +703,45 @@ idle · 1 turns
   o `loop-resume` re-raciocina do zero (re-decide a tool). OK pra tools idempotentes;
   tools com efeito colateral precisariam de dedupe por `tool_call id` (futuro).
 
+## Cap 6 — multi-tool / dispatch dinâmico (DESIGN pronto, BLOQUEADO em deploy)
+
+**Objetivo:** o LLM escolhe entre várias tools em runtime. Como `connector.name`
+no nó é literal, a solução é um connector **meta-dispatcher** `loop-tools` (nome
+estático) que roteia por um argumento `tool_name` → tools internas
+(`calculate`/`get_datetime`/`echo`). Código pronto em
+[docs/loop-tools-connector.py](docs/loop-tools-connector.py).
+
+### ⛔ Achado que bloqueou (e é a lição do cap 6)
+**Connector criado via API NÃO fica "live".** `POST /connector` persiste o registro
+no DB, mas o `machina-client-api` em execução só executa connectors **bundled no
+deploy**. Verificado de forma conclusiva:
+- O `loop-tools` (e até um connector **mínimo sem imports**) falha no call time
+  (`run-tool` → `task-failed`, ~5ms), enquanto connectors deployados
+  (`get_current_datetime_brt`) funcionam.
+- Os registros são **byte-idênticos** (só `updated` difere) — logo a diferença é
+  **deploy**, não dados/campos.
+
+Afina a memória [[pyscript-connector-deps-in-client-api]]: não são só as *deps* —
+o **próprio código** do connector vive no runtime deployado. Tools customizadas
+exigem deploy do client-api (promote → release-beta / release, ver
+[[copilot-chat-tools-and-clientapi-deploy]]).
+
+### O que ficou funcionando (sem deploy)
+Tool use com connectors **já deployados**. O `loop-turn` usa
+`get_current_datetime_brt` como tool `get_datetime` (cap 5, verificado). Multi-tool
+**sem deploy** = um `run-tool-X` por tool, com `condition: tool_calls[0].name == 'X'`
+(condições de task SÃO confiáveis — ≠ condição de workflow do cap 4) sobre
+connectors deployados. Multi-tool **dinâmico de verdade** = deployar o `loop-tools`.
+
+### Quando o deploy acontecer
+1. Adicionar `loop-tools-connector.py` ao set de connectors do client-api + deploy.
+2. Trocar o `run-tool` do `loop-turn` pelo bloco dinâmico (no topo de
+   `loop-tools-connector.py`).
+3. Catálogo (`_3-available-tools`) derivado de `connector_search` = o iii-directory.
+
 ## Próximos capítulos
 
-- **Cap 6 — multi-tool / dispatch dinâmico:** connector meta-dispatcher + catálogo
-  derivado de `connector_search` (= iii-directory). Tool async deixa a sessão
-  `active` e o beat retoma quando o resultado chega.
 - **Cap 7 — sub-agentes / sandbox:** `execute_agent` (child session via
-  `parent_session_id`) e Factory como tool de execução de código.
+  `parent_session_id`) e Factory como tool de execução de código. Tool async
+  encaixa no modelo durável: deixa a sessão `active`, o beat retoma quando o
+  resultado chega.
