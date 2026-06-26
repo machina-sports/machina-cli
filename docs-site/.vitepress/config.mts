@@ -78,6 +78,7 @@ export default defineConfig({
             { text: "execution", link: "/commands/execution" },
             { text: "skills", link: "/commands/skills" },
             { text: "factory", link: "/commands/factory" },
+            { text: "loop", link: "/commands/loop" },
             { text: "sports", link: "/commands/sports" },
             { text: "template", link: "/commands/template" },
             { text: "deploy", link: "/commands/deploy" },
