@@ -84,7 +84,7 @@ $ machina loop run "Quais os próximos 2 jogos? Liste com horário." --watch
 
 ### Teste A — Loop sozinho, pela CLI *(mais simples)*
 ```bash
-machina update                      # garante v0.3.0
+machina update                      # garante v0.4.1 (verificação + auto-reparo)
 # 1) provisiona o loop no pod (idempotente):
 CLIENT_API_URL="https://<org>-<projeto>.org.machina.gg" API_TOKEN="<token>" \
   python3 docs/harness-loop-kit/provision.py
@@ -114,6 +114,37 @@ antigo da pod só aceita por **ObjectId** (acionar por nome → 500).
 (`--teardown` remove). Permite ao revisor rodar **testes isolados com dados reais do
 projeto dele** antes de qualquer fusão de código. Passo a passo + contratos em
 [`VALIDATION.md`](VALIDATION.md).
+
+### Teste D — Verificação (Cap 8) + auto-reparo (Cap 8.2) *(o "chão")*
+Todo turno passa por um **gate determinístico** + um **evaluator independente** antes de
+finalizar `idle`. O `--watch` mostra o veredito:
+```bash
+machina loop run "Quanto é 1234 * 5678?" --watch
+#   idle · 1 turns
+#   ✓ verified (evaluator: gemini-3.1-flash-lite)
+
+machina loop run "Quanto é 10 / 0?" --watch        # a tool erra → o gate fecha
+#   needs_review · 1 turns
+#   ⚠ needs review — ...                            # checkpoint humano, nunca um pass silencioso
+```
+- **Prod:** aponte `EVAL_MODEL` pra um modelo **mais forte que o gerador**
+  (`EVAL_MODEL="<modelo>" … python3 provision.py`) — avaliador do mesmo modelo é leniente.
+- **Auto-reparo (Cap 8.2):** quando o evaluator reprova uma resposta que passou no gate, o
+  loop **conserta 1x** e re-verifica (a CLI mostra `· self-repaired`). Receita determinística
+  pra forçar e ver isso em [`VALIDATION.md`](VALIDATION.md) §D.
+
+Valida: gate fail-closed, `needs_review` (checkpoint humano), auto-reparo. Scorecard
+completo + resultados ao vivo: [`PLAYBOOK-SCORECARD.md`](PLAYBOOK-SCORECARD.md).
+
+### Teste E — Operator-sync (SportsClaw) *(o loop como 2ª lente)*
+O operator daemon do SportsClaw pode rotear cada decisão publicada pro loop durável
+(verificação independente). Liga por job em `~/.sportsclaw/operator/<jobId>.json`:
+```json
+{ "jobId": "studio", "intervalMs": 90000, "operatorSync": { "enabled": true } }
+```
+Precisa de ≥2 ticks (start-now / read-next-tick) e do pod do loop conectado
+(`sportsclaw mcp add <pod>/mcp/sse --token <token>`). Detalhes + como testar:
+SportsClaw `docs/advanced/operator.md` (§Operator-sync). *Mesmo gate do #287 no dispatch.*
 
 ## 7. Pendências honestas (transparência)
 
