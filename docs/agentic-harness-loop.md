@@ -603,11 +603,34 @@ Prova: `machina loop run "Reply with exactly the phrase: HARNESS LIVE" --watch`
    `gemini-2.0-flash-001` **não** está disponível nesse projeto. Bloco
    `context-variables.google-genai` = `{credential: $TEMP_CONTEXT_VARIABLE_VERTEX_AI_CREDENTIAL, project_id: $TEMP_CONTEXT_VARIABLE_VERTEX_AI_PROJECT_ID}`.
 
-## Próximos capítulos (o loop já provado plugga sem reescrever)
+## Cap 3 IMPLEMENTADO — multi-turn + `say` (dev)
 
-- **Cap 2 — observability:** já temos persistência; falta `harness logs` mostrar
-  entries incrementais (o `_watch` já faz diff por índice).
-- **Cap 3 — multi-turn / `say`:** trocar `save` por `update` (append em
-  `value.entries` via dict-spread, padrão `copilot-update`) + condition por `op`.
+Verificado: `loop run … --watch` → turno 1 (`idle`); `loop say <id> "…" --watch`
+→ turno 2 que **lembra o contexto** do turno 1 (codeword/favorite-number tests).
+
+O que mudou no `loop-turn` (sem reescrever — só novos tasks):
+1. **Roteamento por existência, não por `op`.** `load-session` busca por
+   `{name:'harness_session', value.session_id}`. Se existe → append; senão → create.
+   `start` e `say` percorrem o mesmo caminho (start tem id novo → cria; say tem id
+   existente → anexa). Elimina conditions por `op`.
+2. **Histórico no prompt:** `_1-message-history` = `existing_entries` → o LLM mantém
+   contexto entre turnos.
+3. **`persist-new`** (`action:save`, `condition: exists is not True`) vs
+   **`persist-append`** (`action:update`, `condition: exists is True`) com dict-spread
+   `{**existing_value, 'entries':[*existing_entries, novo_user, novo_assistant], 'turn': next_turn, 'status':'idle'}`.
+4. **Status `idle`** após responder = turno concluído, aguardando humano. `say` o
+   reabre implicitamente (novo turno).
+
+⚠️ **Corrida do `say` (resolvida client-side):** `say` é async; o `_watch` veria o
+`idle` do turno anterior e pararia cedo. Fix: `_watch(min_turn=prior_turn+1)` —
+só termina quando `turn` avança. `since_entries` evita re-renderizar o histórico.
+
+## Próximos capítulos
+
+- **Cap 2 — observability:** `harness logs` já coberto pelo `_watch` (diff por índice).
 - **Cap 4 — durabilidade/beat:** `loop-runner.scheduled=true` + `config-frequency`
-  + condition `value.status=='active'` (skip ocioso). Retomada por tick.
+  + condition `value.status=='active'` (skip ocioso). Hoje o loop roda síncrono via
+  executor; o beat adiciona retomada após crash / tool async / espera. Aqui entra o
+  status `active` (trabalho em voo) que o `mark-active` server-side tornaria explícito.
+- **Cap 5+ — tools / sub-agentes / sandbox:** plugam no `tool_calls` (schema já
+  pronto) → `connector_executor` / `execute_agent` / Factory.

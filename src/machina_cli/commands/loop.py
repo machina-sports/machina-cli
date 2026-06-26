@@ -18,7 +18,9 @@ from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
 app = typer.Typer(help="Durable agentic turn loop (harness)")
 console = Console()
 
-TERMINAL_STATUSES = {"completed", "failed", "paused"}
+# `idle` = the turn was answered and the session is awaiting the next user message
+# (continue it with `machina loop say`). The others are end-of-life states.
+TERMINAL_STATUSES = {"idle", "completed", "failed", "paused"}
 
 _ROLE_STYLE = {
     "user": "bold cyan",
@@ -43,11 +45,22 @@ def _render_entry(entry: dict) -> None:
     console.print(f"[dim]turn {turn}[/] [{style}]{role}[/] {body}")
 
 
-def _watch(session_id: str, interval: int = 3, timeout: int = 1800) -> None:
-    """Poll the session document, rendering new entries until it terminates."""
+def _watch(
+    session_id: str,
+    interval: int = 3,
+    timeout: int = 1800,
+    min_turn: int = 1,
+    since_entries: int = 0,
+) -> None:
+    """Poll the session document, rendering new entries until the turn completes.
+
+    `min_turn` guards against the async race where the session still shows the
+    *previous* turn's terminal status: we only stop once `turn >= min_turn`.
+    `since_entries` skips entries already shown (so a follow-up only prints the new turn).
+    """
     client = LoopClient()
     elapsed = 0
-    seen = 0
+    seen = since_entries
     last_status = None
 
     with console.status("running turns…", spinner="dots"):
@@ -60,10 +73,14 @@ def _watch(session_id: str, interval: int = 3, timeout: int = 1800) -> None:
 
             status = session.get("status")
             last_status = status or last_status
-            if status in TERMINAL_STATUSES:
+            if status in TERMINAL_STATUSES and session.get("turn", 0) >= min_turn:
                 console.print(
                     f"\n[bold]{status}[/] · {session.get('turn', seen)} turns · {session_id}"
                 )
+                if status == "idle":
+                    console.print(
+                        f'[dim]Continue with[/] machina loop say {session_id} "<message>"'
+                    )
                 return
 
             time.sleep(interval)
@@ -85,7 +102,7 @@ def run(
     session_id = LoopClient().start(prompt, persona_agent=persona)
     console.print(f"[green]session started[/] {session_id}")
     if watch:
-        _watch(session_id)
+        _watch(session_id, min_turn=1)
     else:
         console.print(f"[dim]Stream it with[/] machina loop watch {session_id}")
 
@@ -105,10 +122,14 @@ def say(
     watch: bool = typer.Option(False, "--watch", "-w", help="Stream turns after injecting"),
 ):
     """Inject a follow-up user turn and re-activate the session."""
-    LoopClient().say(session_id, message)
+    client = LoopClient()
+    prior = client.get_session(session_id) or {}
+    prior_turn = prior.get("turn", 0)
+    prior_entries = len(prior.get("entries", []))
+    client.say(session_id, message)
     console.print("[green]queued[/]")
     if watch:
-        _watch(session_id)
+        _watch(session_id, min_turn=prior_turn + 1, since_entries=prior_entries)
 
 
 @app.command()
