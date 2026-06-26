@@ -739,9 +739,35 @@ connectors deployados. Multi-tool **dinâmico de verdade** = deployar o `loop-to
    `loop-tools-connector.py`).
 3. Catálogo (`_3-available-tools`) derivado de `connector_search` = o iii-directory.
 
-## Próximos capítulos
+## Cap 7 — sub-agentes (PRIMITIVO provado, orquestração async é o design)
 
-- **Cap 7 — sub-agentes / sandbox:** `execute_agent` (child session via
-  `parent_session_id`) e Factory como tool de execução de código. Tool async
-  encaixa no modelo durável: deixa a sessão `active`, o beat retoma quando o
-  resultado chega.
+**Objetivo:** o loop delega uma sub-tarefa a um sub-agente = uma **child session**
+(`parent_session_id` → sessão-mãe), espelhando "spawns sub-agents as child sessions".
+
+### ✅ Provado
+O runner-filho `loop-subturn` roda standalone e cria uma child session linkada:
+`session_id=ses_child`, `parent_session_id=ses_PARENT`, responde "Paris". Ou seja,
+o **primitivo** (child session + linkagem por `parent_session_id`) funciona com os
+mecanismos já dominados (`document save`).
+
+### ⚠️ O que travou
+A invocação **síncrona** do filho via o task type `workflow` (parent chamando
+`loop-subturn` como sub-workflow) retornou vazio / `schedule` não-JSON — contrato do
+`workflow`-task não resolvido às cegas (mesma classe do muro do cap 6; precisa de
+docs/logs da plataforma). Não insisti no blind-debug.
+
+### Design recomendado (durável, só mecanismos provados — sem sub-invocação síncrona)
+1. **Spawn** (na delegação): `loop-turn` grava um **child doc** via `document save`
+   — `{session_id: child, parent_session_id: parent, status:'active', entries:[{user: subtask}]}`
+   — e seta a **mãe** para `status:'waiting'` (registrando `child_session_id`).
+2. **Processa o filho:** o beat (`loop-resume`) já pega sessões `active` → responde.
+3. **Merge de volta:** um fluxo `loop-merge` (no beat) acha mães `waiting` cujo filho
+   está `idle` → anexa a resposta do filho na mãe → mãe `idle`.
+
+Tudo isso reusa o que já existe (document save/update + beat + status como gate).
+Async por natureza → encaixa no modelo durável (a mãe espera em `waiting`; o beat
+costura). É a evolução natural; ficou como design pra não acumular mais DSL às cegas.
+
+### Cap 8+ (futuro)
+Factory como tool de execução de código (job sandboxed via a superfície de customers),
+encaixando como uma tool async no mesmo modelo `waiting`/beat.
