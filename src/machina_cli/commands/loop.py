@@ -18,9 +18,11 @@ from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
 app = typer.Typer(help="Durable agentic turn loop (harness)")
 console = Console()
 
-# `idle` = the turn was answered and the session is awaiting the next user message
-# (continue it with `machina loop say`). The others are end-of-life states.
-TERMINAL_STATUSES = {"idle", "completed", "failed", "paused"}
+# `idle` = the turn was answered, verified, and awaiting the next user message
+# (continue it with `machina loop say`). `needs_review` = the turn finished but
+# failed the independent evaluator / deterministic gate — a human checkpoint, also
+# continuable. The rest are end-of-life states.
+TERMINAL_STATUSES = {"idle", "needs_review", "completed", "failed", "paused"}
 
 _ROLE_STYLE = {
     "user": "bold cyan",
@@ -44,6 +46,26 @@ def _render_entry(entry: dict) -> None:
         body = entry.get("content", "")
 
     console.print(f"[dim]turn {turn}[/] [{style}]{role}[/] {body}")
+
+
+def _render_verdict(session: dict) -> None:
+    """Show the independent evaluator's verdict, if the loop recorded one.
+
+    The server-side loop verifies every turn (deterministic gate + a separate
+    evaluator) before finalizing; this surfaces that verdict so a pass isn't silent
+    and a `needs_review` says *why*.
+    """
+    v = session.get("verification") or {}
+    if not v:
+        return
+    model = v.get("model", "?")
+    reason = v.get("reason", "")
+    if session.get("status") == "needs_review":
+        console.print(
+            f"[yellow]⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator: {model})[/]"
+        )
+    elif v.get("verdict") == "pass":
+        console.print(f"[green]✓ verified[/] [dim](evaluator: {model})[/]")
 
 
 def _watch(
@@ -78,7 +100,8 @@ def _watch(
                 console.print(
                     f"\n[bold]{status}[/] · {session.get('turn', seen)} turns · {session_id}"
                 )
-                if status == "idle":
+                _render_verdict(session)
+                if status in ("idle", "needs_review"):
                     console.print(
                         f'[dim]Continue with[/] machina loop say {session_id} "<message>"'
                     )

@@ -2,6 +2,14 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.0] - 2026-06-26
+
+### Added
+- **Loop verification — the generator/evaluator separation (Cap 8).** A loop turn is now finalized `idle` only after it clears a **deterministic gate** (cheap, code-only — a non-trivial answer, no error marker, and the tool succeeded if one ran) **and** an **independent evaluator** (`loop-evaluate`: a separate prompt with a fresh context + an "assume it's wrong" posture and its own `EVAL_MODEL`). Any failure → **`needs_review`**, the human checkpoint — never a silent pass. The resume path carries an attempt budget (`LOOP_MAX_ATTEMPTS`) so the beat can't re-run a stuck session forever. Verified live against a staging pod.
+  - `machina loop` (`run`/`watch`/`say`) now treats `needs_review` as terminal and renders the evaluator's verdict (`✓ verified` / `⚠ needs review — <reason>`).
+  - Provisioner `docs/harness-loop-kit/provision.py` gains the `loop-evaluate` prompt, the gate, and the attempt budget; tunable via `EVAL_MODEL` (use a stronger model than the generator in prod) and `LOOP_MAX_ATTEMPTS`.
+  - New: `docs/harness-loop-kit/PLAYBOOK-SCORECARD.md` — the loop scored against the Loop-Engineering playbook (the five failure modes, the First-Loop Checklist, the Stripe-Minions pattern) with the live verification results.
+
 ## [0.3.0] - 2026-06-26
 
 ### Added

@@ -766,6 +766,47 @@ Tudo isso reusa o que já existe (document save/update + beat + status como gate
 Async por natureza → encaixa no modelo durável (a mãe espera em `waiting`; o beat
 costura). É a evolução natural; ficou como design pra não acumular mais DSL às cegas.
 
-### Cap 8+ (futuro)
+## Cap 8 — verificação / evaluator (CONSTRUÍDO e validado ao vivo)
+
+**O gap que importava.** Até aqui o loop **raciocinava, agia e se auto-aprovava** — pelo
+playbook, um *"Nodding loop"* (a falha mais comum; verificação é "o chão" de um loop real).
+Cap 8 fecha isso com a **separação gerador/avaliador**.
+
+**O que foi construído** (em `docs/harness-loop-kit/provision.py`):
+- **`loop-evaluate`** — prompt verificador **independente**: contexto fresco, postura
+  *"assuma que está errado"*, modelo próprio (`EVAL_MODEL`, idealmente mais forte que o
+  gerador). Vê só pergunta + resposta-candidata + resultado da tool → retorna
+  `{verdict: pass|fail, reason, severity}`.
+- **Gate determinístico** (padrão *Stripe-Minions* — código barato, **falha fechando**):
+  resposta não-trivial, sem marcador de erro, e — se uma tool rodou — a tool teve sucesso.
+  É a `condition` do task `loop-evaluate`: se o gate falha, o LLM avaliador é **pulado** e o
+  turno vai direto a `needs_review` (mais barato e mais seguro).
+- **Status `needs_review`** — o *checkpoint humano* ("stay the engineer"): o turno só
+  finaliza `idle` se passar **gate E avaliador**; qualquer falha → `needs_review` (nunca um
+  "pass" silencioso). Continua continuável via `say`.
+- **Budget de tentativas** no resume (`LOOP_MAX_ATTEMPTS`): o beat nunca re-roda uma sessão
+  travada pra sempre (guarda do custo "token blowout").
+
+**Forma do turno** (passou de 6 → 8 passos):
+```
+load → ingest(active) → reason → run-tool → respond → [gate] → evaluate → finalize(idle | needs_review)
+```
+
+**Contratos verificados (staging, `gemini-3.1-flash-lite`):**
+- `verification` mora em `value.verification` (`gate_pass`, `verdict`, `reason`, `severity`,
+  `model`) — a CLI lê e mostra (`✓ verified` / `⚠ needs review — <reason>`).
+- Resposta boa → `idle` + `verdict:pass` com motivo específico (avaliador realmente lê, não
+  carimba). Tool que erra (`10/0`) → `gate_pass:False` → `needs_review` **sem gastar** o LLM.
+- **Achado honesto:** avaliador do *mesmo modelo* do gerador é **leniente** com fatos
+  plausíveis-mas-não-suportados → em produção aponte `EVAL_MODEL` pra um modelo **mais
+  forte** (testei `gemini-3.1-pro` mas não estava habilitado no pod → o turno fica `active`,
+  exatamente o caso que beat+budget cobrem). Detalhes e tabela: `docs/harness-loop-kit/PLAYBOOK-SCORECARD.md`.
+
+### Próximo
+- **Cap 8.1** — `EVAL_MODEL` mais forte em prod + **token cap** por turno/sessão.
+- **Cap 8.2 — retry-with-critique:** realimentar `verification.reason` num re-reason
+  *limitado* (gerador/avaliador → gerador/avaliador/reparador) em vez de parar em `needs_review`.
+
+## Cap 9+ (futuro)
 Factory como tool de execução de código (job sandboxed via a superfície de customers),
 encaixando como uma tool async no mesmo modelo `waiting`/beat.
