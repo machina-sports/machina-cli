@@ -7,6 +7,8 @@ fusion with SportsClaw.
 - `provision.py` — stdlib-only, idempotent provisioner (no deps).
 - `VALIDATION.md` — this file: what the loop is, how it maps to the Loop-Engineering
   playbook, how to validate, the verified contracts, and the honest gaps.
+- `PLAYBOOK-SCORECARD.md` — the loop scored against the playbook (5 failure modes,
+  First-Loop Checklist, Minions pattern) + the **live verification of Cap 8**.
 - Deep architecture + chapter-by-chapter build: [`../agentic-harness-loop.md`](../agentic-harness-loop.md).
 - Dynamic-tool dispatcher reference: [`../loop-tools-connector.py`](../loop-tools-connector.py).
 
@@ -19,17 +21,20 @@ workflow + prompt + document + scheduler/beat). The CLI / MCP is a thin driver;
 **all loop state lives in the pod** as `harness_session` documents. One turn:
 
 ```
-load session → ingest(status:active) → reason (decide tool) → run tool → respond → finalize(status:idle)
+load → ingest(active) → reason → run tool → respond → [gate] → evaluate → finalize(idle | needs_review)
 ```
 
 Durable: each turn is persisted before advancing; a session left `active` is
 resumed by the beat (survives crash / async tool / awaiting input). Multi-turn:
-`say` appends a follow-up; prior turns feed back as context.
+`say` appends a follow-up; prior turns feed back as context. **Verified:** a turn
+reaches `idle` only after clearing a deterministic gate **and** an independent
+evaluator; otherwise it stops at `needs_review` (see §2 and `PLAYBOOK-SCORECARD.md`).
 
-Resources provisioned (`provision.py`): prompts `loop-reasoning` + `loop-respond`;
-connector `loop-tools` (calculate / get_datetime / echo / **find_fixtures** = real data);
-workflows `loop-turn` + `loop-resume`; agents `loop-runner` (executor) + `loop-beat`
-(durability tick, **inactive by default**).
+Resources provisioned (`provision.py`): prompts `loop-reasoning` + `loop-respond` +
+`loop-evaluate` (the independent verifier); connector `loop-tools` (calculate /
+get_datetime / echo / **find_fixtures** = real data); workflows `loop-turn` +
+`loop-resume`; agents `loop-runner` (executor) + `loop-beat` (durability tick,
+**inactive by default**).
 
 ---
 
@@ -44,18 +49,19 @@ realizes **five moves** via **six parts**. Where this loop stands:
 | **Persistence** | memory | `harness_session` documents (entries appended each turn; `value.status` is the resume gate) | ✅ |
 | **Discovery** | skill | reasoning prompt + tool catalog; **input-driven** (no autonomous "what should I do" skill yet) | ◑ partial |
 | **Handoff** | worktree | sub-agents via `execute_agent` child sessions (design); **no per-task worktree isolation** | ◑ partial |
-| **Verification** | sub-agents | **none — the generator self-approves** | ❌ **GAP** |
+| **Verification** | sub-agents | `loop-evaluate` (separate context + "assume broken" posture) **+** a deterministic gate; any failure → `needs_review` | ✅ **(Cap 8)** |
 | (connectors) | connectors | `loop-tools` + the pod's MCP surface | ✅ |
 
-> **⚠️ The honest gap (read this).** The playbook's central claim is that
-> **verification is the floor of a loop** — a *separate* evaluator agent, different
-> model, that "assumes broken," acts via MCP, and gates a `/goal`-style stop
-> condition judged by a *fresh* model. This loop has no such evaluator: the same
-> agent reasons, acts, and effectively self-approves. By the paper's taxonomy that
-> makes it a **"Nodding loop"** (verification skipped — the most common failure).
-> It is safe to validate and demo, but **must not run unattended at scale** until an
-> evaluator is added (see §6). This is the single most important thing for a reviewer
-> to know.
+> **✅ The gap that mattered is closed (Cap 8).** The playbook's central claim is that
+> **verification is the floor of a loop** — a *separate* evaluator that "assumes broken"
+> and gates the stop condition. This loop used to skip it (a textbook **"Nodding loop"**:
+> reason → act → self-approve). Cap 8 adds `loop-evaluate` — an independent verifier with a
+> *fresh context* and a skeptical posture (its own `EVAL_MODEL`, ideally stronger than the
+> generator) — in front of a cheap **deterministic gate**. A turn is finalized `idle` only
+> if it clears **both**; otherwise it stops at `needs_review` (the human checkpoint).
+> **Verified live** — see `PLAYBOOK-SCORECARD.md` §6. *Remaining caveat:* run a
+> **different/stronger `EVAL_MODEL`** in production (a same-model evaluator is lenient), and
+> add a per-turn token cap before fully unattended runs.
 
 **First-Loop Checklist (Table VI) applied:**
 
@@ -63,10 +69,10 @@ realizes **five moves** via **six parts**. Where this loop stands:
 | --- | --- |
 | Discovery source | tool catalog + user input (no CI/issue auto-discovery) |
 | State file | `harness_session` document ✅ |
-| **Evaluator** | **missing** ❌ |
-| Isolation | sub-agent design; no worktree ◑ |
-| Token cap | none yet — add `max_turns` / per-run budget before unattended use ❌ |
-| Human review | the CLI `watch`/`say` loop is the open door ✅ |
+| **Evaluator** | `loop-evaluate` + deterministic gate ✅ **(verified live)** |
+| Isolation | per-session doc; `needs_review` quarantines a bad turn ✅ (no worktree needed server-side) |
+| Token cap | resume attempt budget (`LOOP_MAX_ATTEMPTS`) ✅ · per-turn token cap ⚠️ TODO |
+| Human review | `needs_review` + the CLI `watch`/`say` loop ✅ |
 
 ---
 
@@ -154,20 +160,28 @@ By default `loop-beat` is **inactive**. To validate beat-driven resume: set
   dispatches by the agent's **top-level `status:active`**.
 - **Prompt task name = prompt name** (`invoke_prompt` selects by task name) → two
   reasoning passes need two prompts (`loop-reasoning`, `loop-respond`).
+- **Verification fails closed.** The deterministic gate (non-trivial answer, no error
+  marker, tool succeeded if used) is the evaluator task's `condition` — if it fails, the
+  LLM evaluator is *skipped* and the turn goes straight to `needs_review` (cheaper + safer).
+  `EVAL_MODEL` sets the evaluator's model (defaults to the generator's; **use a stronger one
+  in prod**). The resume path carries an `attempts` budget (`LOOP_MAX_ATTEMPTS`) → `needs_review`
+  when exhausted, so the beat can't re-run a stuck session forever.
 
 ---
 
 ## 7. Gaps & roadmap (for code fusion)
 
-1. **Verification / evaluator (highest priority).** Add a separate evaluator —
-   different model, "assume broken," acts via MCP — plus a `/goal`-style stop
-   condition judged by a *fresh* model. This turns the Nodding loop into a real loop.
-2. **Token cap.** Add `max_turns` per burst + a per-session budget before any
-   unattended run.
+1. **Verification / evaluator** ✅ **done (Cap 8)** — `loop-evaluate` (separate context,
+   "assume broken" posture, `EVAL_MODEL`) + a deterministic gate; any failure → `needs_review`.
+   Verified live (`PLAYBOOK-SCORECARD.md` §6). *Next:* point `EVAL_MODEL` at a
+   stronger-than-generator model in prod, and add **Cap 8 — retry-with-critique** (feed
+   `verification.reason` back into a *bounded* re-reason instead of stopping at `needs_review`).
+2. **Token cap.** Have the resume attempt budget (`LOOP_MAX_ATTEMPTS`); add a per-turn /
+   per-session *token* ceiling before any fully unattended run.
 3. **Handoff isolation.** Real sub-agent isolation (worktree-equivalent) for parallel
    child sessions.
 4. **SportsClaw integration (phased):**
    - PR-1 ✅ `machina_loop` tool — delegate durable tasks to this loop via MCP (sportsclaw#113).
    - PR-2 — operator-sync: route the operator daemon's heartbeat/tick decisions into the
-     loop (`OperatorSink → execute_agent`). This is also the natural home for the evaluator
-     (SportsClaw's operator already has broadcast-safety validators).
+     loop (`OperatorSink → execute_agent`). The operator's broadcast-safety validators are a
+     natural *second* evaluator lens on top of Cap 8.

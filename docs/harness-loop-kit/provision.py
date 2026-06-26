@@ -12,20 +12,28 @@ Usage:
     CLIENT_API_URL="https://<org>-<project>.org.machina.gg" \\
     API_TOKEN="<project X-Api-Token>" \\
     [MODEL="gemini-3.1-flash-lite"] \\
+    [EVAL_MODEL="<a different/stronger model>"] \\
+    [LOOP_MAX_ATTEMPTS="3"] \\
     python3 provision.py            # provision (default)
     python3 provision.py --teardown # remove all loop resources
 
 What it creates (maps to the Loop-Engineering five moves — see VALIDATION.md):
-    prompt   loop-reasoning   reason: answer directly or emit tool_calls   (discovery/decide)
-    prompt   loop-respond     synthesize the final answer from tool output
-    connector loop-tools      dispatcher: calculate / get_datetime / echo / find_fixtures
-    workflow loop-turn        load -> ingest(active) -> reason -> tool -> respond -> finalize(idle)
-    workflow loop-resume      beat path: resume an orphaned `active` session   (scheduling)
-    agent    loop-runner      executor path (inactive; CLI/MCP invokes it)
-    agent    loop-beat        durability tick (created INACTIVE by default)    (scheduling)
+    prompt    loop-reasoning   reason: answer directly or emit tool_calls   (discovery/decide)
+    prompt    loop-respond     synthesize the final answer from tool output
+    prompt    loop-evaluate    INDEPENDENT verifier: judge the answer        (verification)
+    connector loop-tools       dispatcher: calculate / get_datetime / echo / find_fixtures
+    workflow  loop-turn        load -> ingest -> reason -> tool -> respond -> EVALUATE -> finalize
+    workflow  loop-resume      beat path: resume an orphaned `active` session  (scheduling)
+    agent     loop-runner      executor path (inactive; CLI/MCP invokes it)
+    agent     loop-beat        durability tick (created INACTIVE by default)   (scheduling)
 
-NOTE: this loop has discovery, handoff(partial), persistence and scheduling, but
-NO independent VERIFICATION (generator/evaluator) yet — see VALIDATION.md §Gaps.
+VERIFICATION (generator/evaluator separation — the playbook's "floor"):
+    A turn is finalized `idle` (done) ONLY if it clears a deterministic gate
+    (cheap, code-only — the Stripe-Minions pattern) AND an independent evaluator
+    prompt (loop-evaluate; fresh context + skeptical posture, EVAL_MODEL). On any
+    failure the session is marked `needs_review` — the human checkpoint, never a
+    silent pass. The resume path adds an attempt budget (LOOP_MAX_ATTEMPTS) so the
+    beat can never re-run a stuck session forever.
 """
 
 import json
@@ -39,6 +47,15 @@ TOKEN = os.environ.get("API_TOKEN", "")
 MODEL = os.environ.get("MODEL", "gemini-3.1-flash-lite")
 GENAI = {"command": "invoke_prompt", "location": "global", "model": MODEL,
          "name": "google-genai", "provider": "vertex_ai"}
+# The evaluator should ideally be a DIFFERENT (fresh / stronger) model than the
+# generator — the playbook's generator/evaluator separation. Defaults to MODEL so
+# it always runs; override EVAL_MODEL to get true model diversity. Either way the
+# evaluator gets a fresh context + a skeptical "assume broken" posture.
+EVAL_MODEL = os.environ.get("EVAL_MODEL", MODEL)
+GENAI_EVAL = {**GENAI, "model": EVAL_MODEL}
+# Resume attempt budget — the stop condition that stops the beat re-running a
+# stuck session forever (the playbook's "token blowout" guard).
+MAX_ATTEMPTS = int(os.environ.get("LOOP_MAX_ATTEMPTS", "3"))
 CTX_VARS = {"debugger": {"enabled": True}, "google-genai": {
     "credential": "$TEMP_CONTEXT_VARIABLE_VERTEX_AI_CREDENTIAL",
     "project_id": "$TEMP_CONTEXT_VARIABLE_VERTEX_AI_PROJECT_ID"}}
@@ -151,9 +168,40 @@ ASST = "{'id':'a'+str($.get('next_turn')),'turn':$.get('next_turn'),'role':'assi
 ENTRIES = "[*$.get('existing_entries', []), " + USER + "] + ([" + TC + ", " + TR + "] if (" + NEEDS + ") else []) + [" + ASST + "]"
 INEW = "{'session_id':$.get('session_id'),'persona_agent':$.get('persona_agent'),'turn':$.get('next_turn'),'status':'active','entries':[*$.get('existing_entries', []), " + USER + "]}"
 IUPD = "{**$.get('existing_value', {}),'session_id':$.get('session_id'),'turn':$.get('next_turn'),'status':'active','entries':[*$.get('existing_entries', []), " + USER + "]}"
-FVAL = "{**$.get('existing_value', {}),'session_id':$.get('session_id'),'persona_agent':$.get('persona_agent'),'turn':$.get('next_turn'),'status':'idle','entries':" + ENTRIES + "}"
+# --- verification: generator/evaluator separation (the playbook "floor") ---
+# Deterministic gate (cheap, code-only — the Stripe-Minions pattern): a non-trivial
+# answer, no error marker, and — if a tool ran — the tool actually succeeded.
+GATE = ("(len((" + FA + " or '').strip()) > 4)"
+        " and ('error:' not in (" + FA + " or '').lower())"
+        " and (((" + NEEDS + ") is not True)"
+        " or ($.get('tool_ok_value') is True and 'error' not in str($.get('tool_result_value','')).lower()))")
+VPASS = "($.get('verdict_obj', {}).get('verdict','fail') == 'pass')"
+VERIFIED = "((" + GATE + ") and " + VPASS + ")"
+# idle ONLY if verified; else needs_review (the human checkpoint — "stay the engineer").
+STATUS = "('idle' if " + VERIFIED + " else 'needs_review')"
+VERIF = ("{'gate_pass':(" + GATE + "),"
+         "'verdict':$.get('verdict_obj', {}).get('verdict','skipped'),"
+         "'reason':$.get('verdict_obj', {}).get('reason',''),"
+         "'severity':$.get('verdict_obj', {}).get('severity','none'),"
+         "'model':'" + EVAL_MODEL + "'}")
+# attempts reset to 0 on a completed turn (the budget counts consecutive resume failures).
+FVAL = ("{**$.get('existing_value', {}),'session_id':$.get('session_id'),'persona_agent':$.get('persona_agent'),"
+        "'turn':$.get('next_turn'),'attempts':0,'status':" + STATUS + ",'verification':" + VERIF + ",'entries':" + ENTRIES + "}")
 RAE = "{'id':'a'+str($.get('r_turn')),'turn':$.get('r_turn'),'role':'assistant','type':'message','content':$.get('reasoning', {}).get('assistant_message','')}"
-RFVAL = "{**$.get('r_value', {}),'status':'idle','entries':[*$.get('r_entries', []), " + RAE + "]}"
+# Resume path: same verification, PLUS an attempt budget (stop condition) so the
+# beat can never re-run a stuck session forever (the "token blowout" guard).
+RANS = "$.get('reasoning', {}).get('assistant_message','')"
+RGATE = "((len((" + RANS + " or '').strip()) > 4) and ('error:' not in (" + RANS + " or '').lower()))"
+RVERIFIED = "((" + RGATE + ") and ($.get('verdict_obj', {}).get('verdict','fail') == 'pass'))"
+RCAP = "($.get('r_attempts', 0) >= " + str(MAX_ATTEMPTS) + ")"
+RNOTCAP = "($.get('r_attempts', 0) < " + str(MAX_ATTEMPTS) + ")"
+RSTATUS = "('needs_review' if (" + RCAP + " or not " + RVERIFIED + ") else 'idle')"
+RVERIF = ("{'gate_pass':(" + RGATE + "),"
+          "'verdict':$.get('verdict_obj', {}).get('verdict','skipped'),"
+          "'reason':($.get('verdict_obj', {}).get('reason','') if " + RNOTCAP + " else 'resume attempt budget exhausted'),"
+          "'severity':$.get('verdict_obj', {}).get('severity','none'),'model':'" + EVAL_MODEL + "'}")
+RENTRIES = "([*$.get('r_entries', [])] + ([" + RAE + "] if " + RNOTCAP + " else []))"
+RFVAL = ("{**$.get('r_value', {}),'attempts':$.get('r_attempts',0)+1,'status':" + RSTATUS + ",'verification':" + RVERIF + ",'entries':" + RENTRIES + "}")
 
 LOAD_OUT = {
     "exists": "len($.get('documents', [])) > 0",
@@ -178,6 +226,27 @@ REASON_INSTR = (
     "- Otherwise answer directly: needs_tool_call=false.\n"
     "name = exact tool from _3-available-tools; arguments_json = JSON-stringified args ('{}' if none). short_message = 1 line.")
 
+# Evaluator: a SEPARATE step with a skeptical posture and a fresh context. It does
+# not see the generator's reasoning — only the question, the candidate answer, and
+# the tool result — so it judges with independent eyes (generator/evaluator split).
+EVAL_SCHEMA = {"title": "LoopVerdict", "type": "object", "properties": {
+    "verdict": {"type": "string", "enum": ["pass", "fail"]},
+    "reason": {"type": "string"},
+    "severity": {"type": "string", "enum": ["none", "minor", "major"]}},
+    "required": ["verdict", "reason", "severity"]}
+
+EVAL_INSTR = (
+    "You are an INDEPENDENT VERIFIER for the Machina loop. You did NOT write the candidate "
+    "answer; assume it is WRONG until the evidence proves otherwise.\n"
+    "Given the user's question (_1-question), the candidate answer (_2-candidate-answer) and any "
+    "tool result (_3-tool-result), decide if the answer ACTUALLY, CORRECTLY and COMPLETELY "
+    "addresses the question.\n"
+    "FAIL if it: leaves part of the question unanswered; states a value/fact not supported by the "
+    "tool result; ignores a stated constraint; is evasive, empty, or off-topic.\n"
+    "PASS only if a careful user would accept it as-is. severity: 'major' for a wrong/unsupported "
+    "fact, 'minor' for incompleteness, 'none' when verdict=pass.\n"
+    "Output verdict ('pass'|'fail'), a one-sentence reason, and severity. Be terse and skeptical.")
+
 
 def definitions():
     reasoning = {"name": "loop-reasoning", "title": "Loop Reasoning", "type": "prompt", "status": "active",
@@ -186,6 +255,9 @@ def definitions():
                "description": "synthesize final answer from tool output",
                "instruction": "Given the user's question and the tool results, write the final answer in assistant_message, in the user's language. Always needs_tool_call=false, tool_calls=[].",
                "schema": R_SCHEMA}
+    evaluate = {"name": "loop-evaluate", "title": "Loop Evaluate", "type": "prompt", "status": "active",
+                "description": "independent verifier (generator/evaluator separation)",
+                "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
     tools = {"name": "loop-tools", "title": "Loop Tools", "status": "active", "description": "meta-dispatcher",
              "filename": "tools.py", "filetype": "pyscript", "filecontent": LOOP_TOOLS_SRC,
              "commands": [{"name": "Dispatch", "value": "dispatch"}]}
@@ -207,9 +279,14 @@ def definitions():
              "outputs": {"reasoning": "$"}},
             {"name": "run-tool", "type": "connector", "condition": NEEDS, "connector": {"command": "dispatch", "name": "loop-tools"},
              "inputs": {"tool_name": "$.get('reasoning', {}).get('tool_calls', [{}])[0].get('name','')", "args_json": "$.get('reasoning', {}).get('tool_calls', [{}])[0].get('arguments_json','{}')"},
-             "outputs": {"tool_result_value": "$.get('tool_result','')"}},
+             "outputs": {"tool_result_value": "$.get('tool_result','')", "tool_ok_value": "$.get('tool_ok')"}},
             {"name": "loop-respond", "type": "prompt", "condition": NEEDS, "connector": GENAI,
              "inputs": {"_2-user-message": "$.get('input_message')", "_4-tool-result": "$.get('tool_result_value','')"}, "outputs": {"reasoning2": "$"}},
+            # Verify (only if the deterministic gate passed — Minions-style): an
+            # independent evaluator judges the candidate answer with fresh eyes.
+            {"name": "loop-evaluate", "type": "prompt", "condition": GATE, "connector": GENAI_EVAL,
+             "inputs": {"_1-question": "$.get('input_message')", "_2-candidate-answer": FA, "_3-tool-result": "$.get('tool_result_value','')"},
+             "outputs": {"verdict_obj": "$"}},
             {"name": "finalize", "type": "document", "config": {"action": "update", "embed-vector": False, "force-update": True},
              "filters": {"name": "'harness_session'", "value.session_id": "$.get('session_id')"}, "documents": {"harness_session": FVAL}},
         ]}
@@ -225,9 +302,14 @@ def definitions():
                 "r_value": "$.get('documents')[0].get('value', {}) if len($.get('documents', [])) > 0 else {}",
                 "r_entries": "$.get('documents')[0].get('value', {}).get('entries', []) if len($.get('documents', [])) > 0 else []",
                 "r_turn": "$.get('documents')[0].get('value', {}).get('turn', 0) if len($.get('documents', [])) > 0 else 0",
-                "r_last_user": "$.get('documents')[0].get('value', {}).get('entries', [])[-1].get('content','') if len($.get('documents', [])) > 0 else ''"}},
-            {"name": "loop-reasoning", "type": "prompt", "condition": "$.get('r_exists') is True", "connector": GENAI,
+                "r_last_user": "$.get('documents')[0].get('value', {}).get('entries', [])[-1].get('content','') if len($.get('documents', [])) > 0 else ''",
+                "r_attempts": "$.get('documents')[0].get('value', {}).get('attempts', 0) if len($.get('documents', [])) > 0 else 0"}},
+            {"name": "loop-reasoning", "type": "prompt", "condition": "$.get('r_exists') is True and " + RNOTCAP, "connector": GENAI,
              "inputs": {"_1-message-history": "$.get('r_entries', [])", "_2-user-message": "$.get('r_last_user')"}, "outputs": {"reasoning": "$"}},
+            # Verify the resumed answer too; skipped when the attempt budget is spent.
+            {"name": "loop-evaluate", "type": "prompt", "condition": "$.get('r_exists') is True and " + RNOTCAP, "connector": GENAI_EVAL,
+             "inputs": {"_1-question": "$.get('r_last_user')", "_2-candidate-answer": RANS, "_3-tool-result": "''"},
+             "outputs": {"verdict_obj": "$"}},
             {"name": "resume-finalize", "type": "document", "condition": "$.get('r_exists') is True",
              "config": {"action": "update", "embed-vector": False, "force-update": True},
              "filters": {"name": "'harness_session'", "value.session_id": "$.get('r_session_id')"}, "documents": {"harness_session": RFVAL}},
@@ -244,7 +326,7 @@ def definitions():
             "description": "durability tick: resume orphaned active sessions (set status:active to enable)",
             "context": {"config-frequency": 0.5}, "context-agent": {},
             "workflows": [{"name": "loop-resume", "description": "resume an orphaned active session", "inputs": {}, "outputs": {"resumed_session": "$.get('resumed_session')"}}]}
-    return [("prompt", reasoning), ("prompt", respond), ("connector", tools),
+    return [("prompt", reasoning), ("prompt", respond), ("prompt", evaluate), ("connector", tools),
             ("workflow", loop_turn), ("workflow", loop_resume), ("agent", runner), ("agent", beat)]
 
 

@@ -50,6 +50,7 @@ rodar sozinho, repetidamente*.
 | Tool `machina_loop` no SportsClaw (delegar via MCP) | ✅ merged (sportsclaw#113, #114, #115) |
 | Fixes do teste real: gpt-5.5/Azure via `/responses`, router, erros honestos | ✅ merged (sportsclaw#116) |
 | **Loop validado AO VIVO pela CLI** — cálculo + fixtures reais | ✅ testado na máquina |
+| **Cap 8 — verificação:** evaluator independente + gate determinístico + budget | ✅ construído e validado ao vivo (staging) |
 | SportsClaw + gpt-5.5 (Azure) **dispara o `machina_loop`** | ✅ validado |
 | Round-trip completo via SportsClaw (por nome) | ⏳ depende do redeploy do MCP (#287) |
 | Redeploy do MCP server da pod (productização) | ⏳ [machina-client-api#287](https://github.com/machina-sports/machina-client-api/issues/287) |
@@ -120,12 +121,15 @@ projeto dele** antes de qualquer fusão de código. Passo a passo + contratos em
    o fix que permite acionar agentes **por nome** via MCP está no código (merged), mas
    **nunca foi buildado/deployado** — os pods rodam imagens MCP antigas. É uma ação de
    release multi-tenant da plataforma (não bloqueia os testes acima — usamos o ObjectId).
-2. **Verification / evaluator** (o ponto central do paper de Loop Engineering): hoje o
-   loop **raciocina e se auto-aprova** — é um *"Nodding loop"*. Falta um **evaluator
-   separado** (modelo diferente, "assume broken") + um stop condition julgado por modelo
-   fresh. **Recomendação:** próximo PR. Sem isso, o loop é seguro para validar/demo, mas
-   **não deve rodar sozinho em escala**.
-3. **Token cap** (orçamento por turno/sessão) antes de qualquer execução não supervisionada.
+2. **Verification / evaluator** ✅ **feito (Cap 7).** O loop agora tem um **evaluator
+   independente** (`loop-evaluate`, contexto fresco + postura "assume broken", `EVAL_MODEL`)
+   + um **gate determinístico**; qualquer falha → `needs_review` (checkpoint humano, nunca
+   um "pass" silencioso). Validado ao vivo — ver
+   [`PLAYBOOK-SCORECARD.md`](PLAYBOOK-SCORECARD.md). *Restam:* apontar `EVAL_MODEL` para um
+   modelo **mais forte que o gerador** em produção (evaluator do mesmo modelo é leniente) e
+   um **token cap** por turno antes de rodar 100% sozinho.
+3. **Token cap** (orçamento por turno/sessão) antes de qualquer execução não supervisionada
+   — já existe o budget de tentativas do resume (`LOOP_MAX_ATTEMPTS`); falta o teto de *tokens*.
 4. **Dado de enrichment (a montante — não é do loop):** o teste real expôs `pre_match_research`
    atribuído ao **fixture errado** em vários jogos (cada batch herda a análise do 1º fixture).
    Bug no pipeline de cobertura, registrado em
