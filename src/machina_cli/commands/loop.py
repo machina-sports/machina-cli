@@ -36,7 +36,8 @@ def _render_entry(entry: dict) -> None:
     style = _ROLE_STYLE.get(role, "white")
 
     if etype == "tool_call":
-        body = f"→ {entry.get('tool', '?')}({entry.get('args', {})})"
+        args = entry.get("content", entry.get("args", ""))
+        body = f"→ {entry.get('tool', '?')}({args})"
     elif etype == "tool_result":
         body = f"← {entry.get('content', '')}"
     else:
