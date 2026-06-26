@@ -47,9 +47,11 @@ rodar sozinho, repetidamente*.
 | --- | --- |
 | `machina loop` na CLI (caps 1–6) + release **v0.3.0** | ✅ merged (machina-cli#23) |
 | Kit de provisionamento + doc técnica | ✅ merged (machina-cli#24) |
-| Tool `machina_loop` no SportsClaw (delegar via MCP) | ✅ merged (sportsclaw#113) |
-| Fixes de descoberta de pod + wiring (do teste e2e) | ✅ merged (sportsclaw#114) |
-| **Integração ponta a ponta validada** (ver §6) | ✅ provado |
+| Tool `machina_loop` no SportsClaw (delegar via MCP) | ✅ merged (sportsclaw#113, #114, #115) |
+| Fixes do teste real: gpt-5.5/Azure via `/responses`, router, erros honestos | ✅ merged (sportsclaw#116) |
+| **Loop validado AO VIVO pela CLI** — cálculo + fixtures reais | ✅ testado na máquina |
+| SportsClaw + gpt-5.5 (Azure) **dispara o `machina_loop`** | ✅ validado |
+| Round-trip completo via SportsClaw (por nome) | ⏳ depende do redeploy do MCP (#287) |
 | Redeploy do MCP server da pod (productização) | ⏳ [machina-client-api#287](https://github.com/machina-sports/machina-client-api/issues/287) |
 
 ## 5. O que JÁ funciona — prova real
@@ -96,14 +98,15 @@ Valida: turno único, multi-turno com contexto, uso de tool, persistência.
 
 ### Teste B — SportsClaw → Loop, via MCP *(a integração)*
 ```bash
-# build do SportsClaw com a tool machina_loop (já em main: #113/#114)
+# build do SportsClaw (tool machina_loop já em main: #113–#116)
 sportsclaw mcp add https://<org>-<projeto>.org.machina.gg/mcp/sse --name machina --token <token>
 sportsclaw "Delega uma tarefa durável: pesquise o próximo jogo e me dê a análise"
 #   → o LLM do SportsClaw descobre o loop e chama machina_loop {action:start} / {action:read}
 ```
 Valida: descoberta automática do loop, delegação durável, leitura do resultado.
-**Nota:** hoje funciona acionando o `loop-runner` pelo **ObjectId** (workaround
-comprovado); **por nome** passa a funcionar após o redeploy do MCP (#287).
+**Validado** com **gpt-5.5** (Azure AI Foundry, via `/responses`): o SportsClaw raciocina
+e chama o `machina_loop`. O **round-trip completa** após o redeploy do MCP (#287) — o MCP
+antigo da pod só aceita por **ObjectId** (acionar por nome → 500).
 
 ### Teste C — Provisionar o loop num pod novo *(o kit)*
 `provision.py` é stdlib puro e parametrizado — sobe o loop inteiro em qualquer pod
@@ -123,6 +126,11 @@ projeto dele** antes de qualquer fusão de código. Passo a passo + contratos em
    fresh. **Recomendação:** próximo PR. Sem isso, o loop é seguro para validar/demo, mas
    **não deve rodar sozinho em escala**.
 3. **Token cap** (orçamento por turno/sessão) antes de qualquer execução não supervisionada.
+4. **Dado de enrichment (a montante — não é do loop):** o teste real expôs `pre_match_research`
+   atribuído ao **fixture errado** em vários jogos (cada batch herda a análise do 1º fixture).
+   Bug no pipeline de cobertura, registrado em
+   [entain-templates#705](https://github.com/machina-sports/entain-templates/issues/705). O loop
+   relatou fielmente os docs — e por isso expôs o problema.
 
 ## 8. Próximos passos sugeridos
 
