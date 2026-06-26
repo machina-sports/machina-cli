@@ -5,15 +5,21 @@ Routes the `tool_name` argument to internal tools, so a single statically-named
 connector gives the loop dynamic multi-tool dispatch (workflow tasks can't name a
 connector dynamically). Pure stdlib — no third-party deps.
 
-⚠️ NOT LIVE UNTIL DEPLOYED. Creating this connector via the Client API persists
-the record in the DB, but the running machina-client-api only executes connectors
-bundled into its DEPLOY (verified: even a no-import connector created via the API
-fails at call time with the same error as this one; the record is byte-identical to
-a working connector — the only difference is deployment). To make this tool live,
-add it to the client-api connector set and deploy (promote → release-beta / release).
-See memory: pyscript-connector-deps-in-client-api, copilot-chat-tools-and-clientapi-deploy.
+LIVE in the dev project and wired into `loop-turn`'s `run-tool` task. Verified
+end-to-end: "1234 * 5678" → calculate → 7006652; echo; get_datetime.
 
-Wire-up in the `loop-turn` workflow (run-tool task), once deployed:
+Connector contract (verified in machina-client-api core/connector/executor.py):
+- A pyscript connector is exec()'d from its DB `filecontent` at call time — there
+  is NO code deploy; creating the connector via the API is enough.
+- Inputs arrive under request_data["params"] (fallback: request_data).
+- The function MUST return {"status": True, "data": {...}}. The `data` dict is what
+  gets merged into workflow context (so the run-tool task reads $.get('tool_result')).
+  Returning a bare dict without status:True is treated as a FAILED connector.
+
+Connector record fields: filename=tools.py, filetype=pyscript,
+commands=[{"name": "Dispatch", "value": "dispatch"}], filecontent=<this file>.
+
+Wire-up in `loop-turn` (run-tool task):
 
     {"name": "run-tool", "type": "connector",
      "condition": "$.get('reasoning', {}).get('needs_tool_call') is True",
@@ -23,8 +29,8 @@ Wire-up in the `loop-turn` workflow (run-tool task), once deployed:
        "args_json": "$.get('reasoning', {}).get('tool_calls', [{}])[0].get('arguments_json','{}')"},
      "outputs": {"tool_result_value": "$.get('tool_result','')"}}
 
-Connector record fields: filename=tools.py, filetype=pyscript,
-commands=[{"name": "Dispatch", "value": "dispatch"}], filecontent=<this file>.
+Add tools by extending the if/elif in dispatch() and the catalog in loop-reasoning's
+`_3-available-tools` input.
 """
 
 import ast
@@ -60,7 +66,7 @@ def _calculate(args):
 
 
 def dispatch(request_data: dict) -> dict:
-    """Single entry point. Inputs arrive under request_data['params'] (pyscript pattern)."""
+    """Single entry point. Inputs under request_data['params']; returns {status, data}."""
     params = request_data.get("params", {}) or request_data
     tool = (params.get("tool_name") or "").strip()
     raw = params.get("args_json", "{}")
@@ -82,4 +88,8 @@ def dispatch(request_data: dict) -> dict:
         result = str(args.get("text", ""))
     else:
         result = "unknown tool: " + tool
-    return {"tool_result": str(result), "tool_ok": tool in ("get_datetime", "calculate", "echo")}
+
+    return {
+        "status": True,
+        "data": {"tool_result": str(result), "tool_ok": tool in ("get_datetime", "calculate", "echo")},
+    }

@@ -573,7 +573,8 @@ sandbox/Factory (cap 7) plugam no `run_tool`/`execute_agent` sem mexer no loop.
 | -------------------- | -------- | ----------------------------------------------------------------- |
 | `loop-reasoning`     | prompt   | reasoning step; schema `{needs_tool_call, tool_calls[], assistant_message, short_message}` |
 | `loop-respond`       | prompt   | síntese pós-tool (cap 5): resposta final usando `tool_result`       |
-| `loop-turn`          | workflow | `load → ingest(active) → loop-reasoning → run-tool → loop-respond → finalize(idle)` |
+| `loop-tools`         | connector| meta-dispatcher pyscript: `dispatch(tool_name)` → calculate/get_datetime/echo |
+| `loop-turn`          | workflow | `load → ingest(active) → loop-reasoning → run-tool (loop-tools) → loop-respond → finalize(idle)` |
 | `loop-resume`        | workflow | beat path: acha sessão `active` órfã → responde última msg → `idle` |
 | `loop-runner`        | agent    | `status:inactive`; CLI invoca via executor; roda `loop-turn`       |
 | `loop-beat`          | agent    | `status:active` + `scheduled` + `config-frequency:0.5`; o beat tica; roda `loop-resume` |
@@ -703,41 +704,38 @@ idle · 1 turns
   o `loop-resume` re-raciocina do zero (re-decide a tool). OK pra tools idempotentes;
   tools com efeito colateral precisariam de dedupe por `tool_call id` (futuro).
 
-## Cap 6 — multi-tool / dispatch dinâmico (DESIGN pronto, BLOQUEADO em deploy)
+## Cap 6 IMPLEMENTADO — multi-tool / dispatch dinâmico (dev, SEM deploy)
 
-**Objetivo:** o LLM escolhe entre várias tools em runtime. Como `connector.name`
-no nó é literal, a solução é um connector **meta-dispatcher** `loop-tools` (nome
-estático) que roteia por um argumento `tool_name` → tools internas
-(`calculate`/`get_datetime`/`echo`). Código pronto em
+**Prova (pela CLI real):**
+```
+What is 1234 * 5678?  → calculate({"expression":"1234 * 5678"}) → ← 7006652 → "7,006,652"
+Echo exactly: …       → echo({"text":"…"})                       → ← …       → "…"
+Name a planet.        → (sem tool)                               → "Mars"
+```
+O LLM escolhe a tool em runtime, o dispatcher roteia, e a resposta usa o resultado.
+
+**Solução:** como `connector.name` no nó é literal, um connector **meta-dispatcher**
+`loop-tools` (nome estático) roteia por um argumento `tool_name` → tools internas
+(`calculate`/`get_datetime`/`echo`). `run-tool` chama `loop-tools::dispatch` com
+`tool_name`/`args_json` vindos de `reasoning.tool_calls[0]`. Código:
 [docs/loop-tools-connector.py](docs/loop-tools-connector.py).
 
-### ⛔ Achado que bloqueou (e é a lição do cap 6)
-**Connector criado via API NÃO fica "live".** `POST /connector` persiste o registro
-no DB, mas o `machina-client-api` em execução só executa connectors **bundled no
-deploy**. Verificado de forma conclusiva:
-- O `loop-tools` (e até um connector **mínimo sem imports**) falha no call time
-  (`run-tool` → `task-failed`, ~5ms), enquanto connectors deployados
-  (`get_current_datetime_brt`) funcionam.
-- Os registros são **byte-idênticos** (só `updated` difere) — logo a diferença é
-  **deploy**, não dados/campos.
+### ✅ Correção de um achado anterior (importante)
+Eu havia concluído que "connector criado via API precisa de deploy do client-api".
+**Estava errado.** Lendo o `machina-client-api` (`core/connector/executor.py`):
+- `connector_script` faz `exec(connector_filecontent)` (do DB) + `eval(connector_command)`
+  no call time → **connectors rodam dinâmicos do DB; não há deploy de código**.
+- O que travava o `loop-tools`: `connector_execute` trata como **falha** qualquer
+  retorno sem `status: True`. Meu `dispatch` retornava `{tool_result, tool_ok}` sem
+  `status`. **Contrato:** retornar `{"status": True, "data": {...}}` — o `data` é
+  mesclado no contexto do workflow (por isso `run-tool` lê `$.get('tool_result')`).
 
-Afina a memória [[pyscript-connector-deps-in-client-api]]: não são só as *deps* —
-o **próprio código** do connector vive no runtime deployado. Tools customizadas
-exigem deploy do client-api (promote → release-beta / release, ver
-[[copilot-chat-tools-and-clientapi-deploy]]).
+Ou seja: a memória [[pyscript-connector-deps-in-client-api]] vale só para as **deps**
+de terceiros (essas sim no runtime); o **código** do connector é dinâmico do DB.
 
-### O que ficou funcionando (sem deploy)
-Tool use com connectors **já deployados**. O `loop-turn` usa
-`get_current_datetime_brt` como tool `get_datetime` (cap 5, verificado). Multi-tool
-**sem deploy** = um `run-tool-X` por tool, com `condition: tool_calls[0].name == 'X'`
-(condições de task SÃO confiáveis — ≠ condição de workflow do cap 4) sobre
-connectors deployados. Multi-tool **dinâmico de verdade** = deployar o `loop-tools`.
-
-### Quando o deploy acontecer
-1. Adicionar `loop-tools-connector.py` ao set de connectors do client-api + deploy.
-2. Trocar o `run-tool` do `loop-turn` pelo bloco dinâmico (no topo de
-   `loop-tools-connector.py`).
-3. Catálogo (`_3-available-tools`) derivado de `connector_search` = o iii-directory.
+### Próximo (opcional)
+Catálogo (`_3-available-tools`) derivado de `connector_search` = o iii-directory
+(hoje é estático com 3 tools). Tool async → encaixa no modelo `waiting`/beat do cap 7.
 
 ## Cap 7 — sub-agentes (PRIMITIVO provado, orquestração async é o design)
 
