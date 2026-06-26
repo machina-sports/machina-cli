@@ -21,7 +21,7 @@ workflow + prompt + document + scheduler/beat). The CLI / MCP is a thin driver;
 **all loop state lives in the pod** as `harness_session` documents. One turn:
 
 ```
-load → ingest(active) → reason → run tool → respond → [gate] → evaluate → finalize(idle | needs_review)
+load → ingest → reason → tool → respond → [gate] → evaluate → [repair → re-eval if rejected] → finalize(idle | needs_review)
 ```
 
 Durable: each turn is persisted before advancing; a session left `active` is
@@ -173,9 +173,10 @@ By default `loop-beat` is **inactive**. To validate beat-driven resume: set
 
 1. **Verification / evaluator** ✅ **done (Cap 8)** — `loop-evaluate` (separate context,
    "assume broken" posture, `EVAL_MODEL`) + a deterministic gate; any failure → `needs_review`.
-   Verified live (`PLAYBOOK-SCORECARD.md` §6). *Next:* point `EVAL_MODEL` at a
-   stronger-than-generator model in prod, and add **Cap 8 — retry-with-critique** (feed
-   `verification.reason` back into a *bounded* re-reason instead of stopping at `needs_review`).
+   Verified live (`PLAYBOOK-SCORECARD.md` §6). **Cap 8.2 — retry-with-critique** ✅ **done too:**
+   a rejected (gate-passing) answer is repaired once (`loop-repair`) and re-verified
+   (`loop-evaluate-2`) before idle/needs_review. *Next:* point `EVAL_MODEL` at a
+   stronger-than-generator model in prod.
 2. **Token cap.** Have the resume attempt budget (`LOOP_MAX_ATTEMPTS`); add a per-turn /
    per-session *token* ceiling before any fully unattended run.
 3. **Handoff isolation.** Real sub-agent isolation (worktree-equivalent) for parallel

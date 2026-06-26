@@ -21,8 +21,10 @@ What it creates (maps to the Loop-Engineering five moves — see VALIDATION.md):
     prompt    loop-reasoning   reason: answer directly or emit tool_calls   (discovery/decide)
     prompt    loop-respond     synthesize the final answer from tool output
     prompt    loop-evaluate    INDEPENDENT verifier: judge the answer        (verification)
+    prompt    loop-repair      bounded self-repair of a rejected answer      (Cap 8.2)
+    prompt    loop-evaluate-2  re-verify the repaired answer                 (Cap 8.2)
     connector loop-tools       dispatcher: calculate / get_datetime / echo / find_fixtures
-    workflow  loop-turn        load -> ingest -> reason -> tool -> respond -> EVALUATE -> finalize
+    workflow  loop-turn        load -> ingest -> reason -> tool -> respond -> EVALUATE -> [repair -> re-eval] -> finalize
     workflow  loop-resume      beat path: resume an orphaned `active` session  (scheduling)
     agent     loop-runner      executor path (inactive; CLI/MCP invokes it)
     agent     loop-beat        durability tick (created INACTIVE by default)   (scheduling)
@@ -34,6 +36,9 @@ VERIFICATION (generator/evaluator separation — the playbook's "floor"):
     failure the session is marked `needs_review` — the human checkpoint, never a
     silent pass. The resume path adds an attempt budget (LOOP_MAX_ATTEMPTS) so the
     beat can never re-run a stuck session forever.
+    Cap 8.2 — retry-with-critique: if the gate passed but the evaluator REJECTED the
+    answer, the loop does ONE bounded repair pass (feeding the rejection reason back)
+    and re-verifies before deciding idle vs needs_review (value.verification.repaired).
 """
 
 import json
@@ -184,9 +189,29 @@ VERIF = ("{'gate_pass':(" + GATE + "),"
          "'reason':$.get('verdict_obj', {}).get('reason',''),"
          "'severity':$.get('verdict_obj', {}).get('severity','none'),"
          "'model':'" + EVAL_MODEL + "'}")
+# --- Cap 8.2: retry-with-critique (bounded self-repair) ---
+# If the gate passed but the evaluator REJECTED the answer, do ONE repair pass (feed the
+# rejection reason back) and re-evaluate. generator/evaluator -> .../repairer. A *gate*
+# failure is never repaired here — it still goes straight to needs_review.
+REPAIR_NEEDED = "((" + GATE + ") and ($.get('verdict_obj', {}).get('verdict','fail') == 'fail'))"
+REPAIR_ANS = "$.get('repair', {}).get('assistant_message','')"
+V2PASS = "($.get('verdict_obj2', {}).get('verdict','fail') == 'pass')"
+# the kept answer: the repaired one if a repair happened, else the first answer.
+FINAL_ANSWER = "(" + REPAIR_ANS + " if " + REPAIR_NEEDED + " else " + FA + ")"
+VERIFIED2 = "(((" + GATE + ") and " + VPASS + ") or (" + REPAIR_NEEDED + " and " + V2PASS + "))"
+STATUS2 = "('idle' if " + VERIFIED2 + " else 'needs_review')"
+# verification reflects the OPERATIVE attempt (the repair's verdict, if we repaired).
+VERIF2 = ("{'gate_pass':(" + GATE + "),"
+          "'verdict':($.get('verdict_obj2', {}).get('verdict','skipped') if " + REPAIR_NEEDED + " else $.get('verdict_obj', {}).get('verdict','skipped')),"
+          "'reason':($.get('verdict_obj2', {}).get('reason','') if " + REPAIR_NEEDED + " else $.get('verdict_obj', {}).get('reason','')),"
+          "'severity':($.get('verdict_obj2', {}).get('severity','none') if " + REPAIR_NEEDED + " else $.get('verdict_obj', {}).get('severity','none')),"
+          "'repaired':" + REPAIR_NEEDED + ",'model':'" + EVAL_MODEL + "'}")
+# the stored assistant entry uses the FINAL (post-repair) answer.
+ASST2 = "{'id':'a'+str($.get('next_turn')),'turn':$.get('next_turn'),'role':'assistant','type':'message','content':" + FINAL_ANSWER + "}"
+ENTRIES2 = "[*$.get('existing_entries', []), " + USER + "] + ([" + TC + ", " + TR + "] if (" + NEEDS + ") else []) + [" + ASST2 + "]"
 # attempts reset to 0 on a completed turn (the budget counts consecutive resume failures).
 FVAL = ("{**$.get('existing_value', {}),'session_id':$.get('session_id'),'persona_agent':$.get('persona_agent'),"
-        "'turn':$.get('next_turn'),'attempts':0,'status':" + STATUS + ",'verification':" + VERIF + ",'entries':" + ENTRIES + "}")
+        "'turn':$.get('next_turn'),'attempts':0,'status':" + STATUS2 + ",'verification':" + VERIF2 + ",'entries':" + ENTRIES2 + "}")
 RAE = "{'id':'a'+str($.get('r_turn')),'turn':$.get('r_turn'),'role':'assistant','type':'message','content':$.get('reasoning', {}).get('assistant_message','')}"
 # Resume path: same verification, PLUS an attempt budget (stop condition) so the
 # beat can never re-run a stuck session forever (the "token blowout" guard).
@@ -247,6 +272,18 @@ EVAL_INSTR = (
     "fact, 'minor' for incompleteness, 'none' when verdict=pass.\n"
     "Output verdict ('pass'|'fail'), a one-sentence reason, and severity. Be terse and skeptical.")
 
+# Repairer (Cap 8.2): runs ONLY when the evaluator rejected a gate-passing answer.
+# It sees the rejection reason and rewrites — bounded to ONE pass (no infinite loop).
+REPAIR_INSTR = (
+    "Your previous answer was REJECTED by an independent verifier. Rewrite it so it is correct "
+    "and complete.\n"
+    "Inputs: the question (_1-question); your rejected answer (_2-rejected-answer); the verifier's "
+    "reason (_3-rejection-reason); the tool result, if any (_4-tool-result).\n"
+    "Use the tool result as the source of truth, address EVERY part of the question, and do not "
+    "repeat the rejected mistake. If a fact is not supported by the tool result, say so plainly "
+    "instead of inventing it.\n"
+    "Put the corrected answer in assistant_message (in the user's language); needs_tool_call=false, tool_calls=[].")
+
 
 def definitions():
     reasoning = {"name": "loop-reasoning", "title": "Loop Reasoning", "type": "prompt", "status": "active",
@@ -258,6 +295,14 @@ def definitions():
     evaluate = {"name": "loop-evaluate", "title": "Loop Evaluate", "type": "prompt", "status": "active",
                 "description": "independent verifier (generator/evaluator separation)",
                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
+    # Cap 8.2 — a prompt task selects its prompt by TASK NAME, so the repair pass and
+    # its re-verification need their own prompts (a workflow can't reuse a task name).
+    repair = {"name": "loop-repair", "title": "Loop Repair", "type": "prompt", "status": "active",
+              "description": "bounded self-repair: rewrite a rejected answer (Cap 8.2)",
+              "instruction": REPAIR_INSTR, "schema": R_SCHEMA}
+    evaluate2 = {"name": "loop-evaluate-2", "title": "Loop Evaluate 2", "type": "prompt", "status": "active",
+                 "description": "independent verifier — re-judge the repaired answer (Cap 8.2)",
+                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
     tools = {"name": "loop-tools", "title": "Loop Tools", "status": "active", "description": "meta-dispatcher",
              "filename": "tools.py", "filetype": "pyscript", "filecontent": LOOP_TOOLS_SRC,
              "commands": [{"name": "Dispatch", "value": "dispatch"}]}
@@ -265,7 +310,7 @@ def definitions():
         "name": "loop-turn", "title": "Loop Turn", "status": "active", "description": "one conversational turn",
         "context-variables": CTX_VARS,
         "inputs": {"session_id": "$.get('session_id')", "input_message": "$.get('input_message')", "persona_agent": "$.get('persona_agent', 'loop-reasoning')"},
-        "outputs": {"session_id": "$.get('session_id')", "assistant_message": FA, "turn": "$.get('next_turn')", "workflow-status": "'executed'"},
+        "outputs": {"session_id": "$.get('session_id')", "assistant_message": FINAL_ANSWER, "turn": "$.get('next_turn')", "workflow-status": "'executed'"},
         "tasks": [
             {"name": "load-session", "type": "document", "config": {"action": "search", "search-limit": 1, "search-vector": False},
              "filters": {"name": "'harness_session'", "value.session_id": "$.get('session_id')"}, "outputs": LOAD_OUT},
@@ -287,6 +332,15 @@ def definitions():
             {"name": "loop-evaluate", "type": "prompt", "condition": GATE, "connector": GENAI_EVAL,
              "inputs": {"_1-question": "$.get('input_message')", "_2-candidate-answer": FA, "_3-tool-result": "$.get('tool_result_value','')"},
              "outputs": {"verdict_obj": "$"}},
+            # Cap 8.2 — retry-with-critique: if the gate passed but the evaluator REJECTED
+            # the answer, repair once (feed the reason back) and re-judge the new answer.
+            {"name": "loop-repair", "type": "prompt", "condition": REPAIR_NEEDED, "connector": GENAI,
+             "inputs": {"_1-question": "$.get('input_message')", "_2-rejected-answer": FA,
+                        "_3-rejection-reason": "$.get('verdict_obj', {}).get('reason','')", "_4-tool-result": "$.get('tool_result_value','')"},
+             "outputs": {"repair": "$"}},
+            {"name": "loop-evaluate-2", "type": "prompt", "condition": REPAIR_NEEDED, "connector": GENAI_EVAL,
+             "inputs": {"_1-question": "$.get('input_message')", "_2-candidate-answer": REPAIR_ANS, "_3-tool-result": "$.get('tool_result_value','')"},
+             "outputs": {"verdict_obj2": "$"}},
             {"name": "finalize", "type": "document", "config": {"action": "update", "embed-vector": False, "force-update": True},
              "filters": {"name": "'harness_session'", "value.session_id": "$.get('session_id')"}, "documents": {"harness_session": FVAL}},
         ]}
@@ -326,7 +380,8 @@ def definitions():
             "description": "durability tick: resume orphaned active sessions (set status:active to enable)",
             "context": {"config-frequency": 0.5}, "context-agent": {},
             "workflows": [{"name": "loop-resume", "description": "resume an orphaned active session", "inputs": {}, "outputs": {"resumed_session": "$.get('resumed_session')"}}]}
-    return [("prompt", reasoning), ("prompt", respond), ("prompt", evaluate), ("connector", tools),
+    return [("prompt", reasoning), ("prompt", respond), ("prompt", evaluate),
+            ("prompt", repair), ("prompt", evaluate2), ("connector", tools),
             ("workflow", loop_turn), ("workflow", loop_resume), ("agent", runner), ("agent", beat)]
 
 

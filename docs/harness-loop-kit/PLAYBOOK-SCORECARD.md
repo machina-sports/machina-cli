@@ -44,7 +44,8 @@ step is **boxed by deterministic gates** — reliability comes from the constrai
 model size. Our turn interleaves the same way:
 
 ```
-reason (LLM) → run-tool → respond (LLM) → [ deterministic GATE ] → evaluate (LLM) → finalize
+reason (LLM) → run-tool → respond (LLM) → [ deterministic GATE ] → evaluate (LLM)
+            → ( [repair (LLM) → re-evaluate (LLM)]  if the evaluator rejected )  → finalize
 ```
 
 - **The gate is cheap code, and it fails closed.** Checks: the answer is non-trivial, has no
@@ -105,14 +106,19 @@ that as **`needs_review`**. The loop never silently marks a questionable turn do
 
 ---
 
-## 7. Still open (next caps)
+## 7. Shipped since, and still open
 
-- **Per-turn / per-session token cap** — we have the attempt budget; add a token ceiling.
-- **A production `EVAL_MODEL`** distinct from the generator (see finding 1).
-- **Cap 8 — retry-with-critique:** feed `verification.reason` back into a *bounded* re-reason,
-  instead of stopping at `needs_review`. (Generator/evaluator → generator/evaluator/repair.)
+- **Cap 8.2 — retry-with-critique** ✅ **done & verified.** If the gate passes but the evaluator
+  *rejects* the answer, the loop does ONE bounded repair (`loop-repair`, feeding the rejection
+  reason back) and re-verifies (`loop-evaluate-2`) before deciding `idle` vs `needs_review`.
+  Generator/evaluator → generator/evaluator/**repairer**; bounded to one pass (no loop). Live
+  proof: forcing the first evaluator to reject a *correct* answer made the loop self-heal to
+  `idle` with `verification.repaired=true`; an answer that passes first time keeps
+  `repaired:false` (repair correctly not triggered).
+- **Per-turn / per-session token cap** — we have the attempt budget; add a token ceiling. *(open)*
+- **A production `EVAL_MODEL`** distinct from the generator (see finding 1). *(open)*
 - **Operator-sync:** route SportsClaw's operator-daemon decisions through the loop; its
-  broadcast-safety validators are a natural *second* evaluator lens.
+  broadcast-safety validators are a natural *second* evaluator lens. *(open)*
 
 > Provisioner: [`provision.py`](provision.py) (`EVAL_MODEL`, `LOOP_MAX_ATTEMPTS`). Architecture:
 > [`../agentic-harness-loop.md`](../agentic-harness-loop.md). Run guide: [`VALIDATION.md`](VALIDATION.md).
