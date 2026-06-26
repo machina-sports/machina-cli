@@ -802,10 +802,19 @@ load → ingest(active) → reason → run-tool → respond → [gate] → evalu
   forte** (testei `gemini-3.1-pro` mas não estava habilitado no pod → o turno fica `active`,
   exatamente o caso que beat+budget cobrem). Detalhes e tabela: `docs/harness-loop-kit/PLAYBOOK-SCORECARD.md`.
 
+### Cap 8.2 — retry-with-critique (CONSTRUÍDO e validado)
+Se o gate passou mas o avaliador **reprovou**, o loop faz **um** reparo limitado
+(`loop-repair`, realimentando o motivo da rejeição) e **re-verifica** (`loop-evaluate-2`)
+antes de decidir `idle` vs `needs_review` — gerador/avaliador → .../**reparador** (1 passo, sem
+laço; falha de *gate* segue direto pra `needs_review`). `value.verification.repaired` registra se
+o turno se auto-curou; a CLI mostra `· self-repaired`. **Validado ao vivo:** forçando o 1º
+avaliador a reprovar uma resposta correta, o loop reparou e o `loop-evaluate-2` (normal)
+re-aprovou → `idle` com `repaired=true`; resposta boa de primeira mantém `repaired=false`.
+
 ### Próximo
-- **Cap 8.1** — `EVAL_MODEL` mais forte em prod + **token cap** por turno/sessão.
-- **Cap 8.2 — retry-with-critique:** realimentar `verification.reason` num re-reason
-  *limitado* (gerador/avaliador → gerador/avaliador/reparador) em vez de parar em `needs_review`.
+- `EVAL_MODEL` mais forte que o gerador em prod + **token cap** por turno/sessão.
+- **Operator-sync** (SportsClaw): rotear decisões do operator daemon pro loop; os validators de
+  broadcast-safety são uma 2ª lente de avaliação.
 
 ## Cap 9+ (futuro)
 Factory como tool de execução de código (job sandboxed via a superfície de customers),

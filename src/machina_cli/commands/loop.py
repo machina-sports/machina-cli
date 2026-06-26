@@ -60,12 +60,15 @@ def _render_verdict(session: dict) -> None:
         return
     model = v.get("model", "?")
     reason = v.get("reason", "")
+    # `repaired` = the evaluator rejected the first answer and the loop self-repaired
+    # it (Cap 8.2 retry-with-critique) before this verdict.
+    repaired = " · self-repaired" if v.get("repaired") else ""
     if session.get("status") == "needs_review":
         console.print(
-            f"[yellow]⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator: {model})[/]"
+            f"[yellow]⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator: {model}{repaired})[/]"
         )
     elif v.get("verdict") == "pass":
-        console.print(f"[green]✓ verified[/] [dim](evaluator: {model})[/]")
+        console.print(f"[green]✓ verified[/] [dim](evaluator: {model}{repaired})[/]")
 
 
 def _watch(

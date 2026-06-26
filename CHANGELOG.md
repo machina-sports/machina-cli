@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.1] - 2026-06-26
+
+### Added
+- **Loop retry-with-critique (Cap 8.2).** When the gate passes but the independent evaluator *rejects* a turn's answer, the loop now does ONE bounded repair pass — feeding the rejection reason back into a `loop-repair` prompt — then re-verifies with `loop-evaluate-2` before deciding `idle` vs `needs_review`. Generator/evaluator → generator/evaluator/**repairer**. A *gate* failure is still never repaired (straight to `needs_review`); the repair is bounded to one pass (no loop). `value.verification.repaired` records whether a turn self-healed; the CLI appends `· self-repaired` to the verdict line. Provisioner adds the `loop-repair` + `loop-evaluate-2` prompts.
+
 ## [0.4.0] - 2026-06-26
 
 ### Added
