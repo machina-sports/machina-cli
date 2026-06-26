@@ -572,8 +572,10 @@ sandbox/Factory (cap 7) plugam no `run_tool`/`execute_agent` sem mexer no loop.
 | Recurso              | Tipo     | Papel                                                              |
 | -------------------- | -------- | ----------------------------------------------------------------- |
 | `loop-reasoning`     | prompt   | reasoning step; schema `{needs_tool_call, tool_calls[], assistant_message, short_message}` |
-| `loop-turn`          | workflow | `loop-reasoning` (prompt) → `persist-session` (document save)      |
-| `loop-runner`        | agent    | embrulha `loop-turn`; mapeia `context-agent` (op/session_id/input_message/persona_agent) |
+| `loop-turn`          | workflow | `load → ingest(active) → loop-reasoning → finalize(idle)`          |
+| `loop-resume`        | workflow | beat path: acha sessão `active` órfã → responde última msg → `idle` |
+| `loop-runner`        | agent    | `status:inactive`; CLI invoca via executor; roda `loop-turn`       |
+| `loop-beat`          | agent    | `status:active` + `scheduled` + `config-frequency:0.5`; o beat tica; roda `loop-resume` |
 
 Prova: `machina loop run "Reply with exactly the phrase: HARNESS LIVE" --watch`
 → `turn 1 user … / turn 1 assistant HARNESS LIVE / completed · 1 turns`.
@@ -625,12 +627,49 @@ O que mudou no `loop-turn` (sem reescrever — só novos tasks):
 `idle` do turno anterior e pararia cedo. Fix: `_watch(min_turn=prior_turn+1)` —
 só termina quando `turn` avança. `since_entries` evita re-renderizar o histórico.
 
+## Cap 4 IMPLEMENTADO — durabilidade via beat (dev)
+
+**Prova:** plantei uma sessão `value.status:'active'` (user sem resposta, simulando
+crash pós-ingest) e **NÃO disparei nada**. O beat real resumiu sozinho em ~11–17s
+→ respondeu corretamente (`Tokyo`, `ORNITHORYNQUE`, …).
+
+### O que mudou
+1. **`loop-turn` em duas fases** (escreve antes de avançar):
+   `load-session` → `ingest` (append user + `status:'active'`) → `loop-reasoning` →
+   `finalize` (append assistant + `status:'idle'`). Crash entre ingest e finalize
+   deixa a sessão `active` ⇒ recuperável.
+2. **`loop-resume`** (workflow do beat): `find-active` (`{name:'harness_session',
+   value.status:'active'}`, limit 1) → raciocina sobre a **última entry do user** →
+   `finalize` `idle`.
+3. **DOIS agents** (decisão de design forçada — ver pegadinha):
+   - `loop-runner` — `status:inactive`, não-scheduled. A CLI invoca via
+     `agent/executor` (funciona em agent inativo). Roda só `loop-turn`.
+   - `loop-beat` — `status:active`, `scheduled:true`, `config-frequency:0.5` (30s).
+     O beat tica. Roda só `loop-resume`.
+
+### ⚠️ Pegadinhas verificadas (cap 4)
+- **`condition` no nível do workflow do agent NÃO gateou** de forma confiável: num
+  tick sem `session_id`, o agent rodou `loop-turn` mesmo com
+  `condition: session_id is not None`, corrompendo a sessão (entry `user` nula +
+  `session_id` nulo). **Solução: separar em dois agents** (um por caminho). Não
+  misturar caminho-executor e caminho-beat no mesmo agent.
+- **O gate do beat é o `status:active` top-level do agent** (confirma
+  [[machina-scheduler-toplevel-status]]) — `scheduled` por si não basta/não é o gate.
+  Por isso `loop-runner` fica `inactive` (fora do beat) e ainda assim é invocável via
+  executor; `loop-beat` fica `active` pra ser ticado.
+- **Plantar sessão de teste:** `POST /document` aceita um campo `value` (convenção
+  workflow) e ele fica consultável por `value.*` — útil pra semear órfãs. (O create
+  REST "normal" usa `content`; workflows leem `value`.)
+- Tick ocioso é no-op barato: `loop-resume` só age se achar `value.status:'active'`;
+  sessões `idle` são ignoradas.
+
+### O loop está durável de verdade
+CLI offline / processo morto / tool async → a sessão fica `active` e o beat retoma.
+A CLI não muda (o `_watch` já trata `active` como não-terminal e só para em `idle`).
+
 ## Próximos capítulos
 
-- **Cap 2 — observability:** `harness logs` já coberto pelo `_watch` (diff por índice).
-- **Cap 4 — durabilidade/beat:** `loop-runner.scheduled=true` + `config-frequency`
-  + condition `value.status=='active'` (skip ocioso). Hoje o loop roda síncrono via
-  executor; o beat adiciona retomada após crash / tool async / espera. Aqui entra o
-  status `active` (trabalho em voo) que o `mark-active` server-side tornaria explícito.
 - **Cap 5+ — tools / sub-agentes / sandbox:** plugam no `tool_calls` (schema já
-  pronto) → `connector_executor` / `execute_agent` / Factory.
+  pronto no `loop-reasoning`) → `connector_executor` / `execute_agent` / Factory.
+  Um tool async encaixa direto no modelo: deixa a sessão `active` e o beat retoma
+  quando o resultado chega.
