@@ -20,12 +20,19 @@ Edges in v0:
   odd ↔ market ↔ fixture        entain-markets-tier3.markets_tier3     (option/fixture consistency)
   market → fixture (linkability) markets PT names ↔ fixtures EN names   (semantic join)
 
+Self-healing: the linkability workflow doesn't just measure the gap — its semantic step
+RESOLVES the cross-language links a deterministic join misses and PERSISTS them as
+`context_graph_links` documents, feeding the client's centralized semantic layer. The
+`context-verify-beat` agent runs the whole sweep on a schedule (self-evolving) — the
+harness loop's verify + self-repair (Cap 8/8.2) applied to the data graph.
+
 Provisions:
   connector context-verify-tools     scan_edges + scan_odds + scan_link
   prompt    context-verify-eval      edge-agnostic assessment (analysis, odds)
-  prompt    context-verify-link      semantic resolver for the linkability edge
-  workflow  context-verify / -odds / -link
-  agent     context-verify-runner    runs every edge audit (inactive by default)
+  prompt    context-link-eval        semantic resolver/healer for the linkability edge
+  workflow  context-verify / -odds / -link   (-link writes context_graph_health + context_graph_links)
+  agent     context-verify-runner    on-demand: every edge audit + heal
+  agent     context-verify-beat      scheduled continuous sweep (inactive by default)
 
 Usage:
     CLIENT_API_URL="https://<org>-<project>.org.machina.gg" \\
@@ -214,29 +221,42 @@ EVAL_INSTR = (
     "state plainly that the edge is internally consistent. Be terse and factual — no advice, no fluff.")
 
 LINK_SCHEMA = {"title": "ContextGraphLink", "type": "object", "properties": {
-    "recovered": {"type": "integer"}, "orphans": {"type": "integer"}, "assessment": {"type": "string"}},
-    "required": ["recovered", "orphans", "assessment"]}
+    "matches": {"type": "array", "items": {"type": "object", "properties": {
+        "market": {"type": "string"}, "fixture": {"type": "string"}}, "required": ["market", "fixture"]}},
+    "orphans": {"type": "array", "items": {"type": "string"}},
+    "assessment": {"type": "string"}},
+    "required": ["matches", "orphans", "assessment"]}
 LINK_INSTR = (
-    "You resolve a Context Graph **linkability** edge — the value a semantic layer adds over a "
-    "deterministic join.\n"
-    "_1-unresolved is a list of betting-market team pairings (often Portuguese, from the bookmaker) that "
-    "a deterministic accent-normalized match could NOT link to a fixture. _2-fixtures is the list of real "
+    "You HEAL a Context Graph **linkability** edge — the value a semantic layer adds over a deterministic "
+    "join.\n"
+    "_1-unresolved is a list of betting-market team pairings (often Portuguese, from the bookmaker) that a "
+    "deterministic accent-normalized match could NOT link to a fixture. _2-fixtures is the list of real "
     "fixtures (team names, often English).\n"
     "For EACH unresolved pairing, decide whether the SAME match exists in _2-fixtures, accounting for "
     "language and spelling (e.g. 'Egito vs Austrália' = 'Egypt vs Australia'; 'Alemanha vs Paraguai' = "
-    "'Germany vs Paraguay'). Count how many you can confidently link (recovered) vs genuine orphans (no "
-    "matching fixture). Output recovered (int), orphans (int), and a 2-sentence assessment naming ONE "
-    "recovered example (PT→EN) — this is exactly the link a deterministic join misses.")
+    "'Germany vs Paraguay').\n"
+    "Output `matches`: for every pairing you can confidently link, an object {market: <the unresolved "
+    "pairing, verbatim>, fixture: <the matching fixture from _2-fixtures, verbatim>}. Put pairings with NO "
+    "matching fixture into `orphans` (verbatim). Do not invent fixtures — only link to entries present in "
+    "_2-fixtures. Also a 2-sentence `assessment` naming ONE recovered example (PT→EN) — the link a "
+    "deterministic join misses.")
 
 # --- workflow fragments ---
 HVAL = ("{'edge':$.get('cg_health', {}).get('edge','?'),'health':$.get('cg_health', {}),"
         "'flagged':$.get('cg_flagged', []),'assessment':$.get('cg_summary', {}).get('assessment',''),"
         "'generator':'context-verify v0'}")
 LINKVAL = ("{'edge':'market->fixture(link)','health':$.get('cg_health', {}),"
-           "'recovered_by_semantic':$.get('cg_link', {}).get('recovered',0),"
-           "'orphans':$.get('cg_link', {}).get('orphans',0),"
+           "'recovered_by_semantic':len($.get('cg_link', {}).get('matches', [])),"
+           "'orphans':len($.get('cg_link', {}).get('orphans', [])),"
            "'assessment':$.get('cg_link', {}).get('assessment',''),"
            "'unresolved_sample':$.get('cg_unresolved', []),'generator':'context-verify link v0'}")
+# The self-HEAL output: the recovered links, persisted back into the graph. This is the
+# repaired sub-graph the loop feeds into the client's centralized semantic layer.
+HEALVAL = ("{'edge':'market->fixture','links':$.get('cg_link', {}).get('matches', []),"
+           "'healed_count':len($.get('cg_link', {}).get('matches', [])),"
+           "'orphan_count':len($.get('cg_link', {}).get('orphans', [])),"
+           "'orphans':$.get('cg_link', {}).get('orphans', []),"
+           "'source':'semantic-heal','generator':'context-heal v0'}")
 
 
 def _audit_workflow(name, title, desc, scan_command):
@@ -259,10 +279,10 @@ def _audit_workflow(name, title, desc, scan_command):
 
 def _link_workflow():
     return {"name": "context-verify-link", "title": "Context Verify Link", "status": "active",
-            "description": "audit market->fixture linkability (deterministic + semantic recovery)",
+            "description": "heal market->fixture linkability (deterministic + semantic recovery, then persist the links)",
             "context-variables": CTX_VARS, "inputs": {"limit": "$.get('limit', 200)"},
             "outputs": {"health": "$.get('cg_health', {})",
-                        "recovered": "$.get('cg_link', {}).get('recovered',0)", "workflow-status": "'executed'"},
+                        "healed": "len($.get('cg_link', {}).get('matches', []))", "workflow-status": "'executed'"},
             "tasks": [
                 {"name": "scan", "type": "connector", "connector": {"command": "scan_link", "name": "context-verify-tools"},
                  "inputs": {"limit": "$.get('limit', 200)"},
@@ -273,6 +293,10 @@ def _link_workflow():
                 {"name": "save-health", "type": "document",
                  "config": {"action": "save", "embed-vector": False, "force-update": True},
                  "documents": {"context_graph_health": LINKVAL}},
+                # self-heal: persist the recovered links back into the graph
+                {"name": "save-links", "type": "document",
+                 "config": {"action": "save", "embed-vector": False, "force-update": True},
+                 "documents": {"context_graph_links": HEALVAL}},
             ]}
 
 
@@ -291,16 +315,22 @@ def definitions():
     wf_a = _audit_workflow("context-verify", "Context Verify", "audit the analysis<->fixture edge", "scan_edges")
     wf_o = _audit_workflow("context-verify-odds", "Context Verify Odds", "audit the odd<->market<->fixture edge", "scan_odds")
     wf_l = _link_workflow()
+    edge_workflows = [
+        {"name": "context-verify", "description": "analysis<->fixture", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
+        {"name": "context-verify-odds", "description": "odd<->market<->fixture", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
+        {"name": "context-verify-link", "description": "market->fixture linkability (heal)", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
+    ]
     runner = {"name": "context-verify-runner", "title": "Context Verify Runner", "status": "inactive", "scheduled": False,
-              "description": "on-demand executor — runs every edge audit",
-              "context-agent": {"limit": "$.get('limit', 200)"},
-              "workflows": [
-                  {"name": "context-verify", "description": "analysis<->fixture", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
-                  {"name": "context-verify-odds", "description": "odd<->market<->fixture", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
-                  {"name": "context-verify-link", "description": "market->fixture linkability", "inputs": {"limit": "$.get('limit', 200)"}, "outputs": {"health": "$.get('health', {})"}},
-              ]}
+              "description": "on-demand executor — runs every edge audit + heal",
+              "context-agent": {"limit": "$.get('limit', 200)"}, "workflows": edge_workflows}
+    # self-evolving: a scheduled sweep that keeps the graph healed as new data lands.
+    # Created INACTIVE (shared pod) — set status:active + tune config-frequency to enable.
+    beat = {"name": "context-verify-beat", "title": "Context Verify Beat", "status": "inactive", "scheduled": True,
+            "description": "continuous self-healing sweep of the context graph (set status:active to enable)",
+            "context": {"config-frequency": 60}, "context-agent": {"limit": "$.get('limit', 200)"},
+            "workflows": edge_workflows}
     return [("connector", tools), ("prompt", evaluate), ("prompt", link_eval),
-            ("workflow", wf_a), ("workflow", wf_o), ("workflow", wf_l), ("agent", runner)]
+            ("workflow", wf_a), ("workflow", wf_o), ("workflow", wf_l), ("agent", runner), ("agent", beat)]
 
 
 def _run_once():
@@ -333,6 +363,16 @@ def _run_once():
         if extra:
             print(extra)
         print(f"  assessment : {v.get('assessment','')}")
+    # self-heal: the persisted recovered links feeding the graph
+    hl = _req("POST", "document/search",
+              {"filters": {"name": "context_graph_links"}, "sorters": ["created", -1], "page_size": 1}).get("data", [])
+    if hl:
+        hv = hl[0].get("value") or {}
+        links = hv.get("links") or []
+        print(f"\n  >> self-heal: {hv.get('healed_count', len(links))} links persisted to context_graph_links "
+              f"({hv.get('orphan_count', 0)} orphans)")
+        for lk in links[:3]:
+            print(f"       healed: {lk.get('market')}  ->  {lk.get('fixture')}")
 
 
 def main():
