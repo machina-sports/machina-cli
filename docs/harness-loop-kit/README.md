@@ -161,13 +161,16 @@ Provisiona um **connector** (2 scanners determinísticos), um **prompt** avaliad
 edge-agnóstico (camada semântica), **2 workflows** e um **agent** que roda todas as auditorias.
 Roda 100% server-side no pod (não depende do MCP / #287). **Medido ao vivo (staging):**
 
-| Aresta | Coleção | Quebradas |
+| Aresta | Coleção | Resultado |
 | --- | --- | --- |
-| `análise↔fixture` | `sportradar-fixture.pre_match_research` ([#705](https://github.com/machina-sports/entain-templates/issues/705)) | **13%** (26/200) |
-| `odd↔market↔fixture` | `entain-markets-tier3` | **0%** (limpo, 65) |
+| `análise↔fixture` | `sportradar-fixture.pre_match_research` ([#705](https://github.com/machina-sports/entain-templates/issues/705)) | **13%** quebradas (26/200) |
+| `odd↔market↔fixture` | `entain-markets-tier3` | **0%** (consistente, 65) |
+| `market→fixture` (linkabilidade) | markets PT ↔ fixtures EN | det. liga **2%**; **semântico recupera ~metade** do resto |
 
-O verificador **localiza onde o contexto quebra** (cobertura) e dá atestado de saúde onde não
-quebra (odds). É o v0 do **Context Graph** — a camada semântica verificada sobre os dados.
+O verificador **localiza onde o contexto quebra** (cobertura), atesta onde não quebra (odds), e
+na aresta de **linkabilidade prova por que a camada de LLM é necessária**: um join determinístico
+liga só 2% das odds aos jogos (nomes PT vs EN, sem id comum), e o passo semântico recupera as
+traduções que ele perde (`Austrália vs Egito` → `Australia vs Egypt`). É o v0 do **Context Graph**.
 Próximas arestas (mesmo motor): `stat↔player↔match`, `narrativa↔evento`.
 
 ## 7. Pendências honestas (transparência)
