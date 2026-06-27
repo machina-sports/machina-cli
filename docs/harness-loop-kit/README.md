@@ -148,20 +148,27 @@ SportsClaw `docs/advanced/operator.md` (§Operator-sync). *Mesmo gate do #287 no
 
 ## 6.5 Context Graph — `context-verify` (a aplicação real)
 
-O mesmo padrão **gerador/avaliador** aplicado a **dados**, não a Q&A: audita a aresta de
-contexto `análise↔fixture` (o caso do [#705](https://github.com/machina-sports/entain-templates/issues/705))
-e grava um documento **`context_graph_health`** consultável — não um script descartável.
+O mesmo padrão **gerador/avaliador** aplicado a **dados**, não a Q&A: audita **arestas de
+contexto** — *está esse dado atribuído à entidade certa?* — e grava um documento
+**`context_graph_health`** por aresta (consultável), não um script descartável.
 
 ```bash
 CLIENT_API_URL="https://<org>-<projeto>.org.machina.gg" API_TOKEN="<token>" \
   python3 docs/harness-loop-kit/context-verify.py --run
 ```
 
-Provisiona um **connector** (gate determinístico: 2 jogos não podem ter análise idêntica →
-toda colisão é uma aresta mal-atribuída), um **prompt** avaliador (camada semântica), um
-**workflow** e um **agent**, e roda uma auditoria. Roda 100% server-side no pod (não depende
-do MCP / #287). **Medido ao vivo (staging):** 26 arestas quebradas em 200 fixtures = **13%**.
-É o v0 do **Context Graph** — a camada semântica verificada sobre os dados.
+Provisiona um **connector** (2 scanners determinísticos), um **prompt** avaliador
+edge-agnóstico (camada semântica), **2 workflows** e um **agent** que roda todas as auditorias.
+Roda 100% server-side no pod (não depende do MCP / #287). **Medido ao vivo (staging):**
+
+| Aresta | Coleção | Quebradas |
+| --- | --- | --- |
+| `análise↔fixture` | `sportradar-fixture.pre_match_research` ([#705](https://github.com/machina-sports/entain-templates/issues/705)) | **13%** (26/200) |
+| `odd↔market↔fixture` | `entain-markets-tier3` | **0%** (limpo, 65) |
+
+O verificador **localiza onde o contexto quebra** (cobertura) e dá atestado de saúde onde não
+quebra (odds). É o v0 do **Context Graph** — a camada semântica verificada sobre os dados.
+Próximas arestas (mesmo motor): `stat↔player↔match`, `narrativa↔evento`.
 
 ## 7. Pendências honestas (transparência)
 
