@@ -187,27 +187,53 @@ def scan_link(request_data: dict) -> dict:
         mdocs = _docs("entain-markets-tier3", {}, lim)
     except Exception as ex:
         return {"status": True, "data": {"health": {"edge": "market->fixture(link)", "error": str(ex)}, "unresolved_sample": [], "fixture_universe": []}}
-    fixture_keys = set(); universe = []
+    fixture_keys = set(); universe = []; fidx_full = {}
     for d in fdocs:
         v = d.get("value", {}) or {}
+        sid = v.get("sport_event_id")
         for hk, ak in (("home_competitor_name", "away_competitor_name"),
                        ("home_competitor_name_original", "away_competitor_name_original")):
             h, a = v.get(hk), v.get(ak)
             if h and a: fixture_keys.add(frozenset([_norm(h), _norm(a)]))
         h, a = v.get("home_competitor_name"), v.get("away_competitor_name")
-        if h and a: universe.append(f"{h} vs {a}")
-    total = linked = 0; unresolved = []
+        if h and a:
+            title = f"{h} vs {a}"; universe.append(title)
+            if sid: fidx_full[title] = sid
+    total = linked = 0; unresolved = []; midx = {}
     for d in mdocs:
         v = d.get("value", {}) or {}
         ht, at = _pairing(v)
         if not (ht and at): continue
         total += 1
         if frozenset([_norm(ht), _norm(at)]) in fixture_keys: linked += 1
-        else: unresolved.append(f"{ht} vs {at}")
+        else:
+            pair = f"{ht} vs {at}"; unresolved.append(pair)
+            if v.get("bwin_fixture_id"): midx[pair] = v["bwin_fixture_id"]
+    sample = unresolved[:25]; uni = sorted(set(universe))[:150]
     health = {"edge": "market->fixture(link)", "markets": total, "linked_deterministic": linked,
               "det_link_rate_pct": round(100 * linked / total) if total else 0, "unresolved": len(unresolved)}
-    return {"status": True, "data": {"health": health,
-            "unresolved_sample": unresolved[:25], "fixture_universe": sorted(set(universe))[:150]}}
+    # market_index/fixture_index let a deterministic step attach ids to the semantic matches.
+    return {"status": True, "data": {"health": health, "unresolved_sample": sample, "fixture_universe": uni,
+            "market_index": {k: midx[k] for k in sample if k in midx},
+            "fixture_index": {t: fidx_full[t] for t in uni if t in fidx_full}}}
+
+def resolve_link_ids(request_data: dict) -> dict:
+    """Attach ids to the semantic matches deterministically (no LLM id-handling):
+    market pairing -> bwin_fixture_id, fixture title -> sport_event_id. The result is a
+    usable bwin<->sportradar resolution table — the healed edge fed into the graph."""
+    p = request_data.get("params", {}) or request_data
+    matches = p.get("matches") or []
+    mi = p.get("market_index") or {}
+    fi = p.get("fixture_index") or {}
+    links = []
+    for m in matches:
+        if not isinstance(m, dict): continue
+        mk, fx = m.get("market"), m.get("fixture")
+        bid, sid = mi.get(mk), fi.get(fx)
+        if bid and sid:
+            links.append({"bwin_fixture_id": bid, "sport_event_id": sid,
+                          "market": mk, "fixture": fx, "source": "semantic-heal"})
+    return {"status": True, "data": {"links": links, "resolved": len(links)}}
 '''
 
 EVAL_SCHEMA = {"title": "ContextGraphAssessment", "type": "object", "properties": {
@@ -252,11 +278,11 @@ LINKVAL = ("{'edge':'market->fixture(link)','health':$.get('cg_health', {}),"
            "'unresolved_sample':$.get('cg_unresolved', []),'generator':'context-verify link v0'}")
 # The self-HEAL output: the recovered links, persisted back into the graph. This is the
 # repaired sub-graph the loop feeds into the client's centralized semantic layer.
-HEALVAL = ("{'edge':'market->fixture','links':$.get('cg_link', {}).get('matches', []),"
-           "'healed_count':len($.get('cg_link', {}).get('matches', [])),"
+HEALVAL = ("{'edge':'market->fixture','links':$.get('cg_links', []),"
+           "'healed_count':$.get('cg_resolved', 0),"
            "'orphan_count':len($.get('cg_link', {}).get('orphans', [])),"
            "'orphans':$.get('cg_link', {}).get('orphans', []),"
-           "'source':'semantic-heal','generator':'context-heal v0'}")
+           "'source':'semantic-heal','generator':'context-heal v1 (id-resolved)'}")
 
 
 def _audit_workflow(name, title, desc, scan_command):
@@ -286,10 +312,17 @@ def _link_workflow():
             "tasks": [
                 {"name": "scan", "type": "connector", "connector": {"command": "scan_link", "name": "context-verify-tools"},
                  "inputs": {"limit": "$.get('limit', 200)"},
-                 "outputs": {"cg_health": "$.get('health')", "cg_unresolved": "$.get('unresolved_sample')", "cg_fixtures": "$.get('fixture_universe')"}},
+                 "outputs": {"cg_health": "$.get('health')", "cg_unresolved": "$.get('unresolved_sample')",
+                             "cg_fixtures": "$.get('fixture_universe')", "cg_market_index": "$.get('market_index')",
+                             "cg_fixture_index": "$.get('fixture_index')"}},
                 {"name": "context-link-eval", "type": "prompt", "connector": GENAI,
                  "inputs": {"_1-unresolved": "$.get('cg_unresolved', [])", "_2-fixtures": "$.get('cg_fixtures', [])"},
                  "outputs": {"cg_link": "$"}},
+                # deterministic id-resolution: attach bwin_fixture_id + sport_event_id to the matches
+                {"name": "resolve-ids", "type": "connector", "connector": {"command": "resolve_link_ids", "name": "context-verify-tools"},
+                 "inputs": {"matches": "$.get('cg_link', {}).get('matches', [])",
+                            "market_index": "$.get('cg_market_index', {})", "fixture_index": "$.get('cg_fixture_index', {})"},
+                 "outputs": {"cg_links": "$.get('links')", "cg_resolved": "$.get('resolved')"}},
                 {"name": "save-health", "type": "document",
                  "config": {"action": "save", "embed-vector": False, "force-update": True},
                  "documents": {"context_graph_health": LINKVAL}},
@@ -305,7 +338,7 @@ def definitions():
              "description": "deterministic edge scanners (analysis + odds + linkability)",
              "filename": "context_verify.py", "filetype": "pyscript", "filecontent": SCAN_SRC,
              "commands": [{"name": "Scan", "value": "scan_edges"}, {"name": "ScanOdds", "value": "scan_odds"},
-                          {"name": "ScanLink", "value": "scan_link"}]}
+                          {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"}]}
     evaluate = {"name": "context-verify-eval", "title": "Context Verify Eval", "type": "prompt", "status": "active",
                 "description": "edge-agnostic semantic lens over graph-health findings",
                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
@@ -372,7 +405,7 @@ def _run_once():
         print(f"\n  >> self-heal: {hv.get('healed_count', len(links))} links persisted to context_graph_links "
               f"({hv.get('orphan_count', 0)} orphans)")
         for lk in links[:3]:
-            print(f"       healed: {lk.get('market')}  ->  {lk.get('fixture')}")
+            print(f"       healed: {lk.get('bwin_fixture_id')} -> {lk.get('sport_event_id')}  ({lk.get('market')} -> {lk.get('fixture')})")
 
 
 def main():

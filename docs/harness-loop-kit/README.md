@@ -174,11 +174,14 @@ traduções que ele perde (`Austrália vs Egito` → `Australia vs Egypt`). É o
 Próximas arestas (mesmo motor): `stat↔player↔match`, `narrativa↔evento`.
 
 **Self-healing + self-evolving.** A aresta de linkabilidade não só mede — o passo semântico
-**grava os links recuperados de volta** (docs `context_graph_links`, ex.: `Austrália vs Egito →
-Australia vs Egypt`), alimentando a camada semântica centralizada do cliente. O agent
+**resolve e grava a tabela de ids de volta** (docs `context_graph_links`:
+`bwin_fixture_id → sport_event_id`, ex.: `2:7826050 → sr:sport_event:53452503` =
+`Austrália vs Egito → Australia vs Egypt`). É o **join bwin↔sportradar que não existia**, curado
+pelo LLM e persistido pra a montagem de contexto do cliente consumir. O agent
 **`context-verify-beat`** (agendado, **inativo por padrão**) roda o sweep contínuo → o grafo se
 **cura e evolui sozinho**. É o self-repair do harness loop (Cap 8.2) aplicado aos **dados**:
-detect → heal → persist → repeat.
+detect → heal → **resolve ids** → persist → repeat. *(Conservador: só links que resolvem a ids
+reais são gravados — o resto fica como órfão.)*
 
 ## 7. Pendências honestas (transparência)
 
