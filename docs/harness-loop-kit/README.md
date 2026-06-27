@@ -146,6 +146,23 @@ Precisa de ≥2 ticks (start-now / read-next-tick) e do pod do loop conectado
 (`sportsclaw mcp add <pod>/mcp/sse --token <token>`). Detalhes + como testar:
 SportsClaw `docs/advanced/operator.md` (§Operator-sync). *Mesmo gate do #287 no dispatch.*
 
+## 6.5 Context Graph — `context-verify` (a aplicação real)
+
+O mesmo padrão **gerador/avaliador** aplicado a **dados**, não a Q&A: audita a aresta de
+contexto `análise↔fixture` (o caso do [#705](https://github.com/machina-sports/entain-templates/issues/705))
+e grava um documento **`context_graph_health`** consultável — não um script descartável.
+
+```bash
+CLIENT_API_URL="https://<org>-<projeto>.org.machina.gg" API_TOKEN="<token>" \
+  python3 docs/harness-loop-kit/context-verify.py --run
+```
+
+Provisiona um **connector** (gate determinístico: 2 jogos não podem ter análise idêntica →
+toda colisão é uma aresta mal-atribuída), um **prompt** avaliador (camada semântica), um
+**workflow** e um **agent**, e roda uma auditoria. Roda 100% server-side no pod (não depende
+do MCP / #287). **Medido ao vivo (staging):** 26 arestas quebradas em 200 fixtures = **13%**.
+É o v0 do **Context Graph** — a camada semântica verificada sobre os dados.
+
 ## 7. Pendências honestas (transparência)
 
 1. **Redeploy do MCP** ([#287](https://github.com/machina-sports/machina-client-api/issues/287)):
