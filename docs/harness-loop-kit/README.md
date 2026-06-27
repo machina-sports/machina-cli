@@ -173,6 +173,13 @@ liga só 2% das odds aos jogos (nomes PT vs EN, sem id comum), e o passo semânt
 traduções que ele perde (`Austrália vs Egito` → `Australia vs Egypt`). É o v0 do **Context Graph**.
 Próximas arestas (mesmo motor): `stat↔player↔match`, `narrativa↔evento`.
 
+**Self-healing + self-evolving.** A aresta de linkabilidade não só mede — o passo semântico
+**grava os links recuperados de volta** (docs `context_graph_links`, ex.: `Austrália vs Egito →
+Australia vs Egypt`), alimentando a camada semântica centralizada do cliente. O agent
+**`context-verify-beat`** (agendado, **inativo por padrão**) roda o sweep contínuo → o grafo se
+**cura e evolui sozinho**. É o self-repair do harness loop (Cap 8.2) aplicado aos **dados**:
+detect → heal → persist → repeat.
+
 ## 7. Pendências honestas (transparência)
 
 1. **Redeploy do MCP** ([#287](https://github.com/machina-sports/machina-client-api/issues/287)):
