@@ -100,7 +100,9 @@ def _docs(name, extra, limit):
     from core.document.controller import document_search
     out, page = [], 1
     flt = {"name": name}; flt.update(extra or {})
-    while len(out) < limit and page <= 8:
+    # page cap follows the requested limit (was a hard `page <= 8` = max 400 docs, which
+    # silently capped the fixture pull at 300 while 2k+ fixtures existed -> false orphans).
+    while len(out) < limit and page <= (limit // 50 + 2):
         r = document_search(filters=flt, page=page, page_size=50, sorters=["_id", -1])
         dd = r.get("data") if isinstance(r, dict) else None
         batch = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
@@ -115,6 +117,75 @@ def _limit(p):
 def _norm(s):
     s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9 ]", "", s).strip()
+
+# Deterministic tier of the semantic layer: national-team names are a finite, known
+# set, so a PT/EN/abbrev -> canonical-code map links the bulk of cross-language pairs
+# WITHOUT an LLM call and across the FULL fixture universe (no candidate truncation).
+# The semantic LLM step is then reserved for the genuine long tail (spelling variants,
+# entities not yet in the map). Raised the deterministic link rate 1% -> ~43% on staging.
+COUNTRY_MAP = {
+    "estados unidos": "us", "usa": "us", "united states": "us", "eua": "us",
+    "bosnia": "ba", "bosnia and herzegovina": "ba", "bosnia e herzegovina": "ba",
+    "holanda": "nl", "netherlands": "nl", "paises baixos": "nl",
+    "marrocos": "ma", "morocco": "ma", "africa do sul": "za", "south africa": "za",
+    "canada": "ca", "panama": "pa", "inglaterra": "eng", "england": "eng",
+    "alemanha": "de", "germany": "de", "franca": "fr", "france": "fr",
+    "suecia": "se", "sweden": "se", "egito": "eg", "egypt": "eg",
+    "australia": "au", "austria": "at", "cabo verde": "cv", "cape verde": "cv",
+    "argentina": "ar", "paraguai": "py", "paraguay": "py", "brasil": "br", "brazil": "br",
+    "espanha": "es", "spain": "es", "uruguai": "uy", "uruguay": "uy",
+    "belgica": "be", "belgium": "be", "nova zelandia": "nz", "new zealand": "nz",
+    "arabia saudita": "sa", "saudi arabia": "sa", "japao": "jp", "japan": "jp",
+    "coreia do sul": "kr", "south korea": "kr", "mexico": "mx", "portugal": "pt",
+    "italia": "it", "italy": "it", "croacia": "hr", "croatia": "hr",
+    "dinamarca": "dk", "denmark": "dk", "suica": "ch", "switzerland": "ch",
+    "equador": "ec", "ecuador": "ec", "catar": "qa", "qatar": "qa",
+    "senegal": "sn", "gana": "gh", "ghana": "gh", "camaroes": "cm", "cameroon": "cm",
+    "nigeria": "ng", "tunisia": "tn", "argelia": "dz", "algeria": "dz",
+    "colombia": "co", "peru": "pe", "chile": "cl", "costa rica": "cr",
+    "polonia": "pl", "poland": "pl", "servia": "rs", "serbia": "rs",
+    "gales": "wal", "wales": "wal", "escocia": "sco", "scotland": "sco",
+    "noruega": "no", "norway": "no", "macedonia do norte": "mk", "north macedonia": "mk",
+    "republica dominicana": "do", "dominican republic": "do", "rd congo": "cd",
+    "republica democratica do congo": "cd", "dr congo": "cd", "congo dr": "cd",
+    "jamaica": "jm", "nicaragua": "ni", "madagascar": "mg", "burundi": "bi",
+    "costa do marfim": "ci", "ivory coast": "ci", "cote divoire": "ci", "cote d ivoire": "ci",
+    "jordania": "jo", "jordan": "jo", "uzbequistao": "uz", "uzbekistan": "uz",
+    "ira": "ir", "iran": "ir", "iraque": "iq", "iraq": "iq", "turquia": "tr", "turkey": "tr",
+    "curacao": "cw", "haiti": "ht", "republica tcheca": "cz", "tchequia": "cz",
+    "czech republic": "cz", "czechia": "cz", "russia": "ru", "ucrania": "ua", "ukraine": "ua",
+    "grecia": "gr", "greece": "gr", "irlanda": "ie", "ireland": "ie", "venezuela": "ve",
+    "bolivia": "bo", "honduras": "hn", "guatemala": "gt", "el salvador": "sv",
+    "trinidad e tobago": "tt", "trinidad and tobago": "tt", "emirados arabes unidos": "ae",
+    "uae": "ae", "nova caledonia": "nc", "new caledonia": "nc",
+    # FIFA/fixture-side official name variants (the sportradar side often differs from common PT/EN)
+    "korea republic": "kr", "korea dpr": "kp", "north korea": "kp", "coreia do norte": "kp",
+    "ir iran": "ir", "china pr": "cn", "china": "cn", "turkiye": "tr", "czech republic": "cz",
+}
+
+def _canon(s):
+    """Map a team name to a canonical country code when known; else fall back to _norm
+    (so cognates still match and non-country names are unaffected)."""
+    n = _norm(s)
+    return COUNTRY_MAP.get(n, n)
+
+def _sim(x, y):
+    """Do two team names plausibly denote the same team? canonical-equal, substring, or
+    >=50% token overlap. Used to GATE the LLM's semantic links."""
+    if _canon(x) == _canon(y): return True
+    nx, ny = _norm(x), _norm(y)
+    if nx and ny and (nx in ny or ny in nx): return True
+    tx, ty = set(nx.split()), set(ny.split())
+    inter = tx & ty
+    return bool(inter) and len(inter) / max(1, min(len(tx), len(ty))) >= 0.5
+
+def _valid_link(mk, fx):
+    """Deterministic gate over an LLM-proposed market->fixture link: BOTH teams must
+    correspond (a bijection). Rejects partial/hallucinated matches like
+    'Egito vs Irã' -> 'Australia vs Egypt' (Irã matches neither side)."""
+    m, f = str(mk or "").split(" vs "), str(fx or "").split(" vs ")
+    if len(m) != 2 or len(f) != 2: return False
+    return (_sim(m[0], f[0]) and _sim(m[1], f[1])) or (_sim(m[0], f[1]) and _sim(m[1], f[0]))
 
 def _pairing(v):
     for _mt, md in (v.get("markets_tier3") or {}).items():
@@ -183,37 +254,54 @@ def scan_link(request_data: dict) -> dict:
     p = request_data.get("params", {}) or request_data
     lim = _limit(p)
     try:
-        fdocs = _docs("sportradar-fixture", {}, max(lim, 300))
-        mdocs = _docs("entain-markets-tier3", {}, lim)
+        # Pull the FULL fixture set (not a 300-doc slice): markets must be linkable against
+        # every fixture, not the first page. Markets are few; fixtures are the haystack.
+        fdocs = _docs("sportradar-fixture", {}, max(lim, 5000))
+        mdocs = _docs("entain-markets-tier3", {}, max(lim, 500))
     except Exception as ex:
         return {"status": True, "data": {"health": {"edge": "market->fixture(link)", "error": str(ex)}, "unresolved_sample": [], "fixture_universe": []}}
-    fixture_keys = set(); universe = []; fidx_full = {}
+    fixture_keys = set(); universe = []; fidx_full = {}; canon_idx = {}
     for d in fdocs:
         v = d.get("value", {}) or {}
         sid = v.get("sport_event_id")
         for hk, ak in (("home_competitor_name", "away_competitor_name"),
                        ("home_competitor_name_original", "away_competitor_name_original")):
             h, a = v.get(hk), v.get(ak)
-            if h and a: fixture_keys.add(frozenset([_norm(h), _norm(a)]))
+            if h and a: fixture_keys.add(frozenset([_canon(h), _canon(a)]))
         h, a = v.get("home_competitor_name"), v.get("away_competitor_name")
         if h and a:
             title = f"{h} vs {a}"; universe.append(title)
-            if sid: fidx_full[title] = sid
-    total = linked = 0; unresolved = []; midx = {}
+            if sid:
+                fidx_full[title] = sid
+                canon_idx[frozenset([_canon(h), _canon(a)])] = (title, sid)
+    total = linked = 0; unresolved = []; midx = {}; det_links = []
     for d in mdocs:
         v = d.get("value", {}) or {}
         ht, at = _pairing(v)
         if not (ht and at): continue
         total += 1
-        if frozenset([_norm(ht), _norm(at)]) in fixture_keys: linked += 1
+        key = frozenset([_canon(ht), _canon(at)])
+        if key in fixture_keys:
+            linked += 1
+            hit = canon_idx.get(key); bid = v.get("bwin_fixture_id")
+            if hit and bid:
+                det_links.append({"bwin_fixture_id": bid, "sport_event_id": hit[1],
+                                  "market": f"{ht} vs {at}", "fixture": hit[0], "source": "deterministic"})
         else:
             pair = f"{ht} vs {at}"; unresolved.append(pair)
             if v.get("bwin_fixture_id"): midx[pair] = v["bwin_fixture_id"]
-    sample = unresolved[:25]; uni = sorted(set(universe))[:150]
+    # No silent caps: hand the FULL fixture universe + all unresolved markets to the
+    # semantic step. Cap only as a prompt-size backstop, and REPORT anything dropped
+    # (the old [:150] alphabetical cut silently hid ~half the fixtures -> false orphans).
+    UNI_CAP, MKT_CAP = 600, 120
+    uni_all = sorted(set(universe))
+    uni = uni_all[:UNI_CAP]; sample = unresolved[:MKT_CAP]
     health = {"edge": "market->fixture(link)", "markets": total, "linked_deterministic": linked,
-              "det_link_rate_pct": round(100 * linked / total) if total else 0, "unresolved": len(unresolved)}
+              "det_link_rate_pct": round(100 * linked / total) if total else 0, "unresolved": len(unresolved),
+              "universe_dropped": len(uni_all) - len(uni), "unresolved_dropped": len(unresolved) - len(sample)}
     # market_index/fixture_index let a deterministic step attach ids to the semantic matches.
     return {"status": True, "data": {"health": health, "unresolved_sample": sample, "fixture_universe": uni,
+            "deterministic_links": det_links,
             "market_index": {k: midx[k] for k in sample if k in midx},
             "fixture_index": {t: fidx_full[t] for t in uni if t in fidx_full}}}
 
@@ -225,15 +313,21 @@ def resolve_link_ids(request_data: dict) -> dict:
     matches = p.get("matches") or []
     mi = p.get("market_index") or {}
     fi = p.get("fixture_index") or {}
-    links = []
+    # Start from the deterministic links (already id-resolved by scan_link), then add the
+    # semantic recoveries on top -> a COMPLETE bwin<->sportradar resolution table.
+    links = [l for l in (p.get("deterministic_links") or []) if isinstance(l, dict)]
+    det_n = len(links); rejected = 0
     for m in matches:
         if not isinstance(m, dict): continue
         mk, fx = m.get("market"), m.get("fixture")
+        if not _valid_link(mk, fx):   # deterministic gate: drop hallucinated/partial LLM links
+            rejected += 1; continue
         bid, sid = mi.get(mk), fi.get(fx)
         if bid and sid:
             links.append({"bwin_fixture_id": bid, "sport_event_id": sid,
                           "market": mk, "fixture": fx, "source": "semantic-heal"})
-    return {"status": True, "data": {"links": links, "resolved": len(links)}}
+    return {"status": True, "data": {"links": links, "resolved": len(links),
+            "deterministic": det_n, "semantic": len(links) - det_n, "rejected": rejected}}
 '''
 
 EVAL_SCHEMA = {"title": "ContextGraphAssessment", "type": "object", "properties": {
@@ -280,9 +374,11 @@ LINKVAL = ("{'edge':'market->fixture(link)','health':$.get('cg_health', {}),"
 # repaired sub-graph the loop feeds into the client's centralized semantic layer.
 HEALVAL = ("{'edge':'market->fixture','links':$.get('cg_links', []),"
            "'healed_count':$.get('cg_resolved', 0),"
+           "'deterministic_count':$.get('cg_det_count', 0),'semantic_count':$.get('cg_sem_count', 0),"
+           "'rejected_count':$.get('cg_rejected', 0),"
            "'orphan_count':len($.get('cg_link', {}).get('orphans', [])),"
            "'orphans':$.get('cg_link', {}).get('orphans', []),"
-           "'source':'semantic-heal','generator':'context-heal v1 (id-resolved)'}")
+           "'source':'deterministic+semantic','generator':'context-heal v2 (country-map + full universe)'}")
 
 
 def _audit_workflow(name, title, desc, scan_command):
@@ -314,15 +410,18 @@ def _link_workflow():
                  "inputs": {"limit": "$.get('limit', 200)"},
                  "outputs": {"cg_health": "$.get('health')", "cg_unresolved": "$.get('unresolved_sample')",
                              "cg_fixtures": "$.get('fixture_universe')", "cg_market_index": "$.get('market_index')",
-                             "cg_fixture_index": "$.get('fixture_index')"}},
+                             "cg_fixture_index": "$.get('fixture_index')", "cg_det_links": "$.get('deterministic_links')"}},
                 {"name": "context-link-eval", "type": "prompt", "connector": GENAI,
                  "inputs": {"_1-unresolved": "$.get('cg_unresolved', [])", "_2-fixtures": "$.get('cg_fixtures', [])"},
                  "outputs": {"cg_link": "$"}},
                 # deterministic id-resolution: attach bwin_fixture_id + sport_event_id to the matches
                 {"name": "resolve-ids", "type": "connector", "connector": {"command": "resolve_link_ids", "name": "context-verify-tools"},
                  "inputs": {"matches": "$.get('cg_link', {}).get('matches', [])",
+                            "deterministic_links": "$.get('cg_det_links', [])",
                             "market_index": "$.get('cg_market_index', {})", "fixture_index": "$.get('cg_fixture_index', {})"},
-                 "outputs": {"cg_links": "$.get('links')", "cg_resolved": "$.get('resolved')"}},
+                 "outputs": {"cg_links": "$.get('links')", "cg_resolved": "$.get('resolved')",
+                             "cg_det_count": "$.get('deterministic')", "cg_sem_count": "$.get('semantic')",
+                             "cg_rejected": "$.get('rejected')"}},
                 {"name": "save-health", "type": "document",
                  "config": {"action": "save", "embed-vector": False, "force-update": True},
                  "documents": {"context_graph_health": LINKVAL}},
