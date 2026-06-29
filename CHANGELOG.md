@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.2] - 2026-06-29
+
+### Added
+- **`machina org usage`**: roll up LLM token consumption across an organization's agent executions — the repeatable answer to "how many tokens did this org consume". Token usage is recorded on **agent** executions (`execution_tokens`), not workflow executions, and the Client-API `execution/agent-search` totals are **page-level only**, so the command iterates the org's projects and paginates+sums client-side, broken down by **project, agent, and day**, with the prompt/completion split surfaced (the cost-shape signal — SportingBOT's chat is ~98% prompt tokens). Flags: `--org` (defaults to the selected org), `--project` to scope to one, `--days` window (default 30; a frozen upper bound keeps pagination stable as new runs arrive), `--top`, `--limit`, and `--json`. Unreachable/undeployed projects are skipped and listed under `projects_unreachable` rather than failing the run. Verified end-to-end against the live Entain SportingBOT deployment.
+
 ## [0.4.1] - 2026-06-26
 
 ### Added
