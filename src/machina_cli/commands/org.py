@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from typing import Optional
 
+import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -321,7 +322,10 @@ def usage(
                 proj, p_agents, p_days, truncated = _sum_project_tokens(
                     pid, token_filter, page_size, on_page=_progress
                 )
-            except SystemExit:
+            # SystemExit: auth/lookup failure (undeployed/inaccessible project).
+            # httpx.HTTPError: the client-api is slow, so a page can time out — skip
+            # that project rather than aborting the whole multi-project scan.
+            except (SystemExit, httpx.HTTPError):
                 unreachable.append(pname)
                 continue
             if proj["count"] == 0:

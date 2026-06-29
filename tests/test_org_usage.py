@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import httpx
 from typer.testing import CliRunner
 
 from machina_cli.main import app
@@ -159,6 +160,22 @@ def test_usage_skips_unreachable_project_without_failing():
     with (
         patch("machina_cli.commands.org.get_config", return_value=None),
         patch("machina_cli.commands.org.ProjectClient", bad),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--project", "p1", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["totals"]["count"] == 0
+    assert payload["projects_unreachable"] == ["p1"]
+
+
+def test_usage_skips_project_on_network_error():
+    # the client-api is slow; a page can time out (httpx.HTTPError) — skip the
+    # project rather than aborting the whole multi-project scan
+    client = MagicMock()
+    client.return_value.post.side_effect = httpx.ReadTimeout("slow")
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.ProjectClient", client),
     ):
         result = runner.invoke(app, ["org", "usage", "--project", "p1", "--json"])
     assert result.exit_code == 0, result.output
