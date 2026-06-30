@@ -78,15 +78,25 @@ jobs:
           # Write to file for gh release
           echo "$notes" > release_notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
-            --title "$tag" \
-            --notes-file release_notes.md \
-            artifacts/**/*
+          # Idempotent: a release may already exist if it was created from the GitHub
+          # UI / `gh release create` (which also creates the tag that triggers this
+          # workflow). In that case `gh release create` errors ("already exists") and
+          # the built binaries never get attached — leaving an empty release. So if the
+          # release exists, refresh its notes and upload the assets with --clobber.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file release_notes.md
+            gh release upload "$tag" artifacts/**/* --clobber
+          else
+            gh release create "$tag" \
+              --title "$tag" \
+              --notes-file release_notes.md \
+              artifacts/**/*
+          fi
 
   publish-pypi:
     needs: [github-release]
