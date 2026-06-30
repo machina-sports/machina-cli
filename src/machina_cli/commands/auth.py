@@ -68,29 +68,44 @@ def do_login(
     # Mode 1: API key
     if api_key:
         store_credential("api_key", api_key)
-        console.print("[green]API key stored successfully.[/green]")
+        console.print("[green]API key stored.[/green]")
 
-        # Verify the key works — try login/session first, fall back to org search
+        # Best-effort identity. CRITICAL: allow_fallback=False so a 5xx never swaps in
+        # the session token (which would report the wrong identity), and the key is
+        # NEVER cleared on failure — verification is informational only. quiet=True so
+        # we own the messaging instead of leaking raw error lines. A 5xx here is
+        # commonly the server faulting on API-key auth, not a bad key.
         client = MachinaClient()
+        label = ""
         try:
-            result = client.get("login/session")
-            user_data = result.get("data", {})
-            name = user_data.get("name", "Unknown")
-            console.print(f"Authenticated as [bold]{name}[/bold]")
+            data = (
+                client.get("login/session", allow_fallback=False, quiet=True).get("data", {}) or {}
+            )
+            label = data.get("name") or data.get("email") or ""
         except SystemExit:
-            # login/session may not support API key auth — try listing orgs instead
             try:
-                result = client.post("user/organizations/search", {
-                    "filters": {}, "page": 1, "page_size": 1, "sorters": ["name", 1],
-                })
-                orgs = result.get("data", [])
+                orgs = (
+                    client.post(
+                        "user/organizations/search",
+                        {"filters": {}, "page": 1, "page_size": 1, "sorters": ["name", 1]},
+                        allow_fallback=False,
+                        quiet=True,
+                    ).get("data", [])
+                    or []
+                )
                 if orgs:
-                    org_name = orgs[0].get("organization_name", orgs[0].get("name", ""))
-                    console.print(f"Authenticated — org: [bold]{org_name}[/bold]")
-                else:
-                    console.print("[green]API key verified.[/green]")
+                    label = orgs[0].get("organization_name") or orgs[0].get("name") or ""
             except SystemExit:
-                console.print("[yellow]API key stored but could not verify. Check the key is valid.[/yellow]")
+                label = ""
+
+        if label:
+            console.print(f"Authenticated as [bold]{label}[/bold]")
+        else:
+            console.print(
+                "[yellow]Key stored, but the server didn't confirm it (the auth endpoints "
+                "may not accept API keys, or returned an error). The key is kept — run a "
+                "command to use it, or set the MACHINA_API_KEY env var.[/yellow]"
+            )
         return
 
     # Mode 3: Username/password (explicit flag)
@@ -146,17 +161,27 @@ def do_login(
 
 @app.command()
 def login(
-    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key"),
-    with_credentials: bool = typer.Option(False, "--with-credentials", help="Use username/password instead of browser"),
-    username: Optional[str] = typer.Option(None, "--username", "-u", help="Username (requires --with-credentials)"),
-    password: Optional[str] = typer.Option(None, "--password", "-p", help="Password (requires --with-credentials)"),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key", "-k", help="Authenticate with an API key"
+    ),
+    with_credentials: bool = typer.Option(
+        False, "--with-credentials", help="Use username/password instead of browser"
+    ),
+    username: Optional[str] = typer.Option(
+        None, "--username", "-u", help="Username (requires --with-credentials)"
+    ),
+    password: Optional[str] = typer.Option(
+        None, "--password", "-p", help="Password (requires --with-credentials)"
+    ),
 ):
     """Login to the Machina platform.
 
     Default: opens browser for Clerk authentication (magic link / SSO).
     Use --api-key for CI/CD, or --with-credentials for username/password.
     """
-    do_login(api_key=api_key, username=username, password=password, with_credentials=with_credentials)
+    do_login(
+        api_key=api_key, username=username, password=password, with_credentials=with_credentials
+    )
 
 
 @app.command()
@@ -168,6 +193,7 @@ def logout():
     # Open browser logout to clear session cookies (Clerk + machina session)
     session_url = get_config("session_url") or "https://session.machina.gg"
     import webbrowser
+
     console.print("[dim]Opening browser to clear session cookies...[/dim]")
     webbrowser.open(f"{session_url}/logout")
     console.print("[green]Logged out completely.[/green]")
@@ -186,11 +212,14 @@ def clear_session():
     # Open browser to clear session cookies on the SESSION app
     session_url = get_config("session_url") or "https://session.machina.gg"
     import webbrowser
+
     console.print("[dim]Opening browser to clear server-side cookies...[/dim]")
     webbrowser.open(f"{session_url}/logout")
 
     console.print()
-    console.print("[bold]Session fully cleared.[/bold] Run [bold #FF5C1F]machina login[/bold #FF5C1F] to re-authenticate.")
+    console.print(
+        "[bold]Session fully cleared.[/bold] Run [bold #FF5C1F]machina login[/bold #FF5C1F] to re-authenticate."
+    )
 
 
 @app.command()
@@ -222,19 +251,25 @@ def whoami(
     auth_method = "API Key" if header_name == "X-Api-Token" else "Session Token"
 
     if json_output:
-        print(json.dumps({
-            "authenticated": True,
-            "name": user_data.get("name"),
-            "email": user_data.get("email"),
-            "user_id": user_data.get("_id", user_data.get("id")),
-            "auth_method": auth_method,
-        }))
+        print(
+            json.dumps(
+                {
+                    "authenticated": True,
+                    "name": user_data.get("name"),
+                    "email": user_data.get("email"),
+                    "user_id": user_data.get("_id", user_data.get("id")),
+                    "auth_method": auth_method,
+                }
+            )
+        )
         return
 
-    console.print(Panel.fit(
-        f"[bold]Name:[/bold] {user_data.get('name', 'N/A')}\n"
-        f"[bold]Email:[/bold] {user_data.get('email', 'N/A')}\n"
-        f"[bold]User ID:[/bold] {user_data.get('_id', user_data.get('id', 'N/A'))}\n"
-        f"[bold]Auth:[/bold] {auth_method}",
-        title="Current User",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Name:[/bold] {user_data.get('name', 'N/A')}\n"
+            f"[bold]Email:[/bold] {user_data.get('email', 'N/A')}\n"
+            f"[bold]User ID:[/bold] {user_data.get('_id', user_data.get('id', 'N/A'))}\n"
+            f"[bold]Auth:[/bold] {auth_method}",
+            title="Current User",
+        )
+    )
