@@ -2,6 +2,13 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.3] - 2026-06-30
+
+### Fixed
+- **`machina org usage` no longer silently drops a project on a transient error.** The big collections (e.g. `sbot-prd`) return intermittent `500`s under load; the previous build caught that as "unreachable" and skipped the project, producing a complete-looking but wildly undercounted total (e.g. 73M instead of ~440M when SBOT Prd dropped). Now:
+  - Each project session + execution page is **retried** on transient failures (`500`/timeout) with backoff, so the heavy projects scan through.
+  - A reachable project whose scan still fails is reported as **errored** and the run is flagged **INCOMPLETE / PARTIAL** in red (with the affected projects listed) — distinct from a benign **skip** of an undeployed/no-access project. A partial total is never presented as if it were whole. `--json` gains `incomplete`, `projects_errored`, `projects_skipped`.
+
 ## [0.4.2] - 2026-06-29
 
 ### Added

@@ -155,33 +155,66 @@ def test_usage_resolves_projects_for_org():
     assert payload["totals"]["total"] == _TOTAL
 
 
-def test_usage_skips_unreachable_project_without_failing():
-    bad = MagicMock(side_effect=SystemExit(1))  # ProjectClient() raises -> project skipped
+def test_usage_skips_undeployed_project_as_benign():
+    # ProjectClient() (session login) fails persistently -> undeployed/no access ->
+    # benign skip, NOT marked incomplete.
+    bad = MagicMock(side_effect=SystemExit(1))
     with (
         patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("time.sleep", lambda *a: None),  # don't wait on retry backoff
         patch("machina_cli.commands.org.ProjectClient", bad),
     ):
         result = runner.invoke(app, ["org", "usage", "--project", "p1", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["totals"]["count"] == 0
-    assert payload["projects_unreachable"] == ["p1"]
+    assert payload["projects_skipped"] == ["p1"]
+    assert payload["projects_errored"] == []
+    assert payload["incomplete"] is False
 
 
-def test_usage_skips_project_on_network_error():
-    # the client-api is slow; a page can time out (httpx.HTTPError) — skip the
-    # project rather than aborting the whole multi-project scan
+def test_usage_flags_incomplete_when_reachable_project_scan_fails():
+    # session opens fine (reachable) but the search keeps 500ing/timing out -> the
+    # project is ERRORED and the total must be flagged PARTIAL, never silently dropped.
     client = MagicMock()
     client.return_value.post.side_effect = httpx.ReadTimeout("slow")
     with (
         patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("time.sleep", lambda *a: None),
         patch("machina_cli.commands.org.ProjectClient", client),
     ):
         result = runner.invoke(app, ["org", "usage", "--project", "p1", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["totals"]["count"] == 0
-    assert payload["projects_unreachable"] == ["p1"]
+    assert payload["projects_errored"] == ["p1"]
+    assert payload["projects_skipped"] == []
+    assert payload["incomplete"] is True
+
+
+def test_usage_retries_then_succeeds():
+    # transient failures (sbot-prd-style 500s) recover on retry -> project IS counted
+    client = MagicMock()
+    calls = {"n": 0}
+
+    def _post(path, payload=None):
+        calls["n"] += 1
+        if calls["n"] <= 2:  # fail the first two attempts, succeed on the third
+            raise httpx.ReadTimeout("transient 500")
+        return {"data": _ROWS, "total_documents": len(_ROWS), "status": True}
+
+    client.return_value.post.side_effect = _post
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("time.sleep", lambda *a: None),
+        patch("machina_cli.commands.org.ProjectClient", client),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--project", "p1", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["totals"]["total"] == _TOTAL  # recovered, fully counted
+    assert payload["incomplete"] is False
+    assert payload["projects_errored"] == []
 
 
 def test_usage_no_org_no_project_errors():

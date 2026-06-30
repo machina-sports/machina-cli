@@ -143,6 +143,14 @@ def use(
 # we paginate and sum client-side. A frozen upper date bound keeps pagination stable
 # as new executions arrive mid-scan.
 _TOKEN_FILTER_KEY = "execution_tokens.total_tokens"
+_SCAN_RETRIES = 3  # big collections (e.g. sbot-prd) 500 intermittently under load; retry recovers
+_RETRY_BACKOFF = 0.8
+
+
+class _ScanIncomplete(Exception):
+    """A reachable project's scan kept failing after retries. Its tokens are missing,
+    so the org total must be flagged PARTIAL — never silently dropped (that would turn
+    a transient 500 on the biggest project into a plausible-looking but wrong total)."""
 
 
 def _resolve_org_projects(org_id: str) -> list[tuple[str, str]]:
@@ -180,10 +188,30 @@ def _sum_project_tokens(project_id: str, token_filter: dict, page_size: int, on_
     ProjectClient) on auth/connection failure — callers should catch and skip.
     `on_page(count, total_tokens)` is invoked after each page for progress display.
     """
+    import time
     from collections import defaultdict
     from email.utils import parsedate_to_datetime
 
-    client = ProjectClient(project_id)
+    def _retry(fn, *, tries, incomplete_on_fail):
+        # Retry transient failures: ProjectClient raises SystemExit on a 500, httpx
+        # raises on a timeout. On give-up, either re-raise (caller skips an undeployed
+        # project) or raise _ScanIncomplete (caller flags a reachable project's partial
+        # scan loudly instead of silently dropping it).
+        last = None
+        for attempt in range(tries):
+            try:
+                return fn()
+            except (SystemExit, httpx.HTTPError) as exc:
+                last = exc
+                if attempt == tries - 1:
+                    if incomplete_on_fail:
+                        raise _ScanIncomplete(project_id) from last
+                    raise
+                time.sleep(_RETRY_BACKOFF * (attempt + 1))
+
+    # Project session. A persistent failure means undeployed/no-access — let it
+    # propagate so the caller records a benign skip.
+    client = _retry(lambda: ProjectClient(project_id), tries=2, incomplete_on_fail=False)
     proj = {"prompt": 0, "completion": 0, "total": 0, "count": 0}
     by_agent: dict = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "count": 0})
     by_day: dict = defaultdict(lambda: {"total": 0, "count": 0})
@@ -192,9 +220,20 @@ def _sum_project_tokens(project_id: str, token_filter: dict, page_size: int, on_
     max_pages = 400  # safety net; the `total` check below normally breaks first
     truncated = False
     while True:
-        res = client.post(
-            "execution/agent-search",
-            {"filters": token_filter, "page": page, "page_size": page_size, "sorters": ["_id", -1]},
+        # The search on a reachable project: a persistent failure (e.g. sbot-prd's
+        # heavy collection 500ing) means the scan is INCOMPLETE, not skippable.
+        res = _retry(
+            lambda: client.post(
+                "execution/agent-search",
+                {
+                    "filters": token_filter,
+                    "page": page,
+                    "page_size": page_size,
+                    "sorters": ["_id", -1],
+                },
+            ),
+            tries=_SCAN_RETRIES,
+            incomplete_on_fail=True,
         )
         rows = res.get("data", [])
         if not rows:
@@ -297,7 +336,8 @@ def usage(
     by_project: dict = {}
     by_agent: dict = defaultdict(lambda: {"prompt": 0, "completion": 0, "total": 0, "count": 0})
     by_day: dict = defaultdict(lambda: {"total": 0, "count": 0})
-    unreachable: list[str] = []
+    skipped: list[str] = []  # undeployed / no access — expected, excluded
+    errored: list[str] = []  # reachable but scan failed after retries — total is PARTIAL
     truncated_projects: list[str] = []
 
     status_cm = (
@@ -308,7 +348,7 @@ def usage(
     n = len(targets)
     # _quiet_clients silences the core/project HTTP clients: undeployed or
     # inaccessible projects print a red error and raise SystemExit, which we catch
-    # and record as unreachable — the leaked error would just be noise mid-scan.
+    # and record as skipped/errored — the leaked error would just be noise mid-scan.
     with status_cm as status, _quiet_clients():
         for i, (pid, pname) in enumerate(targets, 1):
 
@@ -322,11 +362,14 @@ def usage(
                 proj, p_agents, p_days, truncated = _sum_project_tokens(
                     pid, token_filter, page_size, on_page=_progress
                 )
-            # SystemExit: auth/lookup failure (undeployed/inaccessible project).
-            # httpx.HTTPError: the client-api is slow, so a page can time out — skip
-            # that project rather than aborting the whole multi-project scan.
+            except _ScanIncomplete:
+                # reachable project whose search kept failing — its tokens are MISSING,
+                # so the org total is partial (flagged loudly below), not silently dropped.
+                errored.append(pname)
+                continue
             except (SystemExit, httpx.HTTPError):
-                unreachable.append(pname)
+                # login/lookup failed after retries -> undeployed or no access; expected.
+                skipped.append(pname)
                 continue
             if proj["count"] == 0:
                 continue
@@ -351,19 +394,27 @@ def usage(
             "by_project": by_project,
             "by_agent": dict(sorted(by_agent.items(), key=lambda kv: -kv[1]["total"])),
             "by_day": dict(sorted(by_day.items())),
-            "projects_unreachable": unreachable,
+            "incomplete": bool(errored),
+            "projects_errored": errored,
+            "projects_skipped": skipped,
             "projects_truncated": truncated_projects,
         }
         console.print_json(_json.dumps(payload, default=str))
         return
 
     if grand["count"] == 0:
-        console.print(
-            f"[yellow]No token-bearing agent executions in the last {days} day(s) "
-            f"for organization {org_id}.[/yellow]"
-        )
-        if unreachable:
-            console.print(f"[dim]Unreachable projects: {', '.join(unreachable)}[/dim]")
+        if errored:
+            console.print(
+                f"[bold red]⚠ {len(errored)} project(s) failed to scan: "
+                f"{', '.join(errored)} — re-run to retry (results would be partial).[/bold red]"
+            )
+        else:
+            console.print(
+                f"[yellow]No token-bearing agent executions in the last {days} day(s) "
+                f"for organization {org_id}.[/yellow]"
+            )
+        if skipped:
+            console.print(f"[dim]Skipped (undeployed/no access): {', '.join(skipped)}[/dim]")
         return
 
     total = grand["total"]
@@ -373,11 +424,19 @@ def usage(
 
     from rich.panel import Panel
 
+    if errored:
+        console.print(
+            f"[bold red]⚠ INCOMPLETE — {len(errored)} reachable project(s) failed to scan "
+            f"and are NOT in the totals below:[/bold red] {', '.join(errored)}\n"
+            f"[red]The numbers below are PARTIAL. Re-run to retry those projects.[/red]\n"
+        )
+    total_label = "Total tokens (PARTIAL):" if errored else "Total tokens:"
+
     console.print(
         Panel.fit(
             f"[bold]Organization:[/bold] {org_id}\n"
             f"[bold]Window:[/bold] last {days}d ({date_from[:10]} → {date_to[:10]})\n"
-            f"[bold]Total tokens:[/bold] {total:,}\n"
+            f"[bold]{total_label}[/bold] {total:,}\n"
             f"[bold]  prompt:[/bold] {grand['prompt']:,} ({prompt_pct:.1f}%)   "
             f"[bold]completion:[/bold] {grand['completion']:,} ({completion_pct:.1f}%)\n"
             f"[bold]Executions:[/bold] {grand['count']:,}   "
@@ -427,8 +486,13 @@ def usage(
         dt.add_row(day, f"{agg['count']:,}", f"{agg['total']:,}")
     console.print(dt)
 
-    if unreachable:
-        console.print(f"\n[dim]Skipped (unreachable/undeployed): {', '.join(unreachable)}[/dim]")
+    if errored:
+        console.print(
+            f"\n[bold red]⚠ Excluded (scan failed): {', '.join(errored)} — totals are PARTIAL; "
+            "re-run to retry.[/bold red]"
+        )
+    if skipped:
+        console.print(f"[dim]Skipped (undeployed/no access): {', '.join(skipped)}[/dim]")
     if truncated_projects:
         console.print(
             f"[yellow]Note:[/yellow] hit the page cap for {', '.join(truncated_projects)} — "
