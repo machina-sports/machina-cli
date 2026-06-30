@@ -155,6 +155,23 @@ def test_usage_resolves_projects_for_org():
     assert payload["totals"]["total"] == _TOTAL
 
 
+def test_resolve_org_projects_labels_unnamed_stub():
+    # a bare membership stub (project_id only, no name) gets a readable label, not a
+    # raw ObjectId — and is still returned as a target (never silently excluded)
+    from machina_cli.commands import org as org_mod
+
+    projects = [
+        {"project_id": "p1", "project_name": "Real One", "organization_id": "org_1"},
+        {"project_id": "69ffa178815a5305f540dcac", "organization_id": "org_1"},  # bare stub
+        {"project_id": "p3", "project_name": "Other Org", "organization_id": "org_2"},
+    ]
+    with patch("machina_cli.commands.org.MachinaClient", _projects_client(projects)):
+        targets = dict(org_mod._resolve_org_projects("org_1"))
+    assert targets["p1"] == "Real One"
+    assert targets["69ffa178815a5305f540dcac"] == "(unnamed:69ffa178)"
+    assert "p3" not in targets  # other org excluded
+
+
 def test_usage_skips_undeployed_project_as_benign():
     # ProjectClient() (session login) fails persistently -> undeployed/no access ->
     # benign skip, NOT marked incomplete.
