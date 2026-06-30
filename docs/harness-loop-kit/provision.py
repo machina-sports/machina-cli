@@ -164,7 +164,7 @@ def _fetch_conversations(a):
     # posthog.ai_events table (input/output_choices, anchored on trace_id, 30d retention);
     # events carries only metadata. Key read from the posthog-surface-config doc (same as
     # the surface-verify defense). Returns recent (user-context, bot-answer, category).
-    import urllib.request
+    import urllib.request, urllib.error, time
     try:
         from core.document.controller import document_search
     except Exception as ex:
@@ -197,13 +197,26 @@ def _fetch_conversations(a):
        "FROM posthog.ai_events AS a INNER JOIN t ON a.trace_id=t.tid "
        "ORDER BY t.ts DESC LIMIT "+str(limit))
     body=json.dumps({"query":{"kind":"HogQLQuery","query":q}}).encode()
-    req=urllib.request.Request("https://us.posthog.com/api/projects/"+pid+"/query/",data=body,
-        headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
-    try:
-        with urllib.request.urlopen(req,timeout=45) as resp:
-            data=json.loads(resp.read() or "{}")
-    except Exception as ex:
-        return "fetch_conversations posthog error: "+str(ex)[:160]
+    url="https://us.posthog.com/api/projects/"+pid+"/query/"
+    hdr={"Authorization":"Bearer "+key,"Content-Type":"application/json"}
+    data=None
+    # The PostHog query API returns intermittent 5xx under load (same class as the
+    # org-usage scan). Retry transient failures before giving up so a flaky moment
+    # doesn't fail the whole turn.
+    for attempt in range(3):
+        try:
+            req=urllib.request.Request(url,data=body,headers=hdr,method="POST")
+            with urllib.request.urlopen(req,timeout=45) as resp:
+                data=json.loads(resp.read() or "{}")
+            break
+        except urllib.error.HTTPError as ex:
+            if ex.code>=500 and attempt<2:
+                time.sleep(1.5*(attempt+1)); continue
+            return "fetch_conversations posthog error: HTTP %s"%ex.code
+        except Exception as ex:
+            if attempt<2:
+                time.sleep(1.5*(attempt+1)); continue
+            return "fetch_conversations posthog error: "+str(ex)[:140]
     out=[]
     for row in (data.get("results") or []):
         out.append({"category":row[0],"user_ctx":(row[1] or "")[:240],"bot":(row[2] or "")[:240]})
