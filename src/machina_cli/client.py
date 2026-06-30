@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 from rich.console import Console
 
-from machina_cli.config import _clear_credential, get_api_url, get_credential, resolve_auth_token
+from machina_cli.config import get_api_url, get_credential, resolve_auth_token
 
 console = Console(stderr=True)
 
@@ -28,7 +28,7 @@ class MachinaClient:
             raise SystemExit(1)
         return headers
 
-    def _handle_response(self, response: httpx.Response) -> dict:
+    def _handle_response(self, response: httpx.Response, quiet: bool = False) -> dict:
         data = {}
         try:
             data = response.json()
@@ -42,60 +42,93 @@ class MachinaClient:
             if isinstance(error, dict):
                 error_msg = error.get("message", "")
 
+        def emit(*args):
+            if not quiet:
+                console.print(*args)
+
         if response.status_code == 401:
-            console.print(f"[red]{error_msg or 'Session expired.'}[/red]")
-            console.print("[yellow]Run `machina login` to re-authenticate.[/yellow]")
+            emit(f"[red]{error_msg or 'Session expired.'}[/red]")
+            emit("[yellow]Run `machina login` to re-authenticate.[/yellow]")
             raise SystemExit(1)
         if response.status_code == 403:
-            msg = error_msg or "Permission denied."
-            console.print(f"[red]{msg}[/red]")
+            emit(f"[red]{error_msg or 'Permission denied.'}[/red]")
             raise SystemExit(1)
         if response.status_code == 404:
-            msg = error_msg or "Resource not found."
-            console.print(f"[red]{msg}[/red]")
+            emit(f"[red]{error_msg or 'Resource not found.'}[/red]")
             raise SystemExit(1)
         if response.status_code >= 500:
-            msg = error_msg or "Server error. Try again later."
-            console.print(f"[red]{msg}[/red]")
+            emit(f"[red]{error_msg or 'Server error. Try again later.'}[/red]")
             raise SystemExit(1)
 
         if isinstance(data, dict) and data.get("status") == "error":
-            console.print(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
+            emit(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
             raise SystemExit(1)
 
         return data
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
-        """Execute request with automatic API key fallback on 500."""
+        """Execute a request, optionally falling back from API key to session token on 5xx."""
         url = f"{self.api_url}/{path.lstrip('/')}"
         skip_auth = kwargs.pop("skip_auth", False)
+        allow_fallback = kwargs.pop("allow_fallback", True)
+        quiet = kwargs.pop("quiet", False)
         headers = {"Content-Type": "application/json"} if skip_auth else self._headers()
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
                 response = getattr(client, method)(url, headers=headers, **kwargs)
 
-                # If API key returns 500, it may be invalid/missing from Redis.
-                # Clear it and retry with session token if available.
-                if response.status_code >= 500 and headers.get("X-Api-Token"):
-                    if get_credential("session_token"):
-                        console.print(
-                            "[yellow]API key rejected by server. "
-                            "Falling back to session token...[/yellow]"
-                        )
-                        _clear_credential("api_key")
-                        headers = self._headers()
-                        response = getattr(client, method)(url, headers=headers, **kwargs)
+                # A 5xx while sending an API key is ambiguous: the key may be invalid,
+                # the endpoint may not accept API-key auth (it 500s instead of 401), or
+                # the server may simply be faulting. Fall back to the session token for
+                # THIS request only — never delete the stored key on a 5xx (that would
+                # silently discard a possibly-valid key, e.g. during `login --api-key`).
+                if allow_fallback and response.status_code >= 500 and headers.get("X-Api-Token"):
+                    session = get_credential("session_token")
+                    if session:
+                        retry_headers = {k: v for k, v in headers.items() if k != "X-Api-Token"}
+                        retry_headers["X-Session-Token"] = session
+                        retry = getattr(client, method)(url, headers=retry_headers, **kwargs)
+                        if retry.status_code < 500:
+                            if not quiet:
+                                console.print(
+                                    "[yellow]API key not accepted by the server here; "
+                                    "used your session token for this request.[/yellow]"
+                                )
+                            response = retry
 
-                return self._handle_response(response)
+                return self._handle_response(response, quiet=quiet)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]")
+            if not quiet:
+                console.print(
+                    f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]"
+                )
             raise SystemExit(1)
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
-        return self._request("get", path, params=params)
+    def get(
+        self,
+        path: str,
+        params: Optional[dict] = None,
+        allow_fallback: bool = True,
+        quiet: bool = False,
+    ) -> dict:
+        return self._request("get", path, params=params, allow_fallback=allow_fallback, quiet=quiet)
 
-    def post(self, path: str, json_data: Optional[dict] = None, skip_auth: bool = False) -> dict:
-        return self._request("post", path, json=json_data or {}, skip_auth=skip_auth)
+    def post(
+        self,
+        path: str,
+        json_data: Optional[dict] = None,
+        skip_auth: bool = False,
+        allow_fallback: bool = True,
+        quiet: bool = False,
+    ) -> dict:
+        return self._request(
+            "post",
+            path,
+            json=json_data or {},
+            skip_auth=skip_auth,
+            allow_fallback=allow_fallback,
+            quiet=quiet,
+        )
 
-    def delete(self, path: str) -> dict:
-        return self._request("delete", path)
+    def delete(self, path: str, allow_fallback: bool = True, quiet: bool = False) -> dict:
+        return self._request("delete", path, allow_fallback=allow_fallback, quiet=quiet)
