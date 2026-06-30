@@ -109,37 +109,48 @@ def scan_surface(request_data):
             pass
     try: hours = int(p.get("window_hours", 6) or 6)
     except Exception: hours = 6
-    traffic_floor = int(p.get("traffic_floor", 300) or 300)
-    odds_floor = float(p.get("odds_floor", 0.004) or 0.004)
-    err_ceiling = float(p.get("err_ceiling", 0.01) or 0.01)
+    session_floor = int(p.get("session_floor", 80) or 80)
+    odds_floor = float(p.get("odds_floor", 0.02) or 0.02)
+    err_ceiling = float(p.get("err_ceiling", 0.08) or 0.08)
     if not key:
         return {"status": True, "data": {"health": {"edge": "surface<->users", "error": "no posthog_key (vault POSTHOG_QUERY_KEY)"}, "verdict": "unknown", "heal_needed": False}}
+    # Denominator is chat SESSIONS (bot engagement), NOT count(DISTINCT person_id)
+    # over all events — the latter is diluted by total site traffic (e.g. 7k site
+    # visitors vs ~600 chat sessions) and is not an odds-health signal. Calibrated on
+    # 14d: odds/session on busy days floors at ~0.07, so 0.02 only fires on a real
+    # collapse; sessions<80 (6h) is genuine low-traffic (skip).
     sql = ("SELECT countIf(event='odds_widget_viewed') AS odds, "
+           "countIf(event='chat_session_started') AS sessions, "
            "countIf(event='chat_error') AS chat_err, "
            "countIf(event='$exception') AS exceptions, "
            "count(DISTINCT person_id) AS users "
-           "FROM events WHERE timestamp > now() - INTERVAL " + str(hours) + " HOUR")
+           "FROM events WHERE timestamp > now() - INTERVAL " + str(hours) + " HOUR "
+           "AND event IN ('odds_widget_viewed','chat_session_started','chat_error','$exception')")
     try:
         res = _hogql(key, project, sql)
-        row = (res.get("results") or [[0, 0, 0, 0]])[0]
-        odds, chat_err, exceptions, users = int(row[0]), int(row[1]), int(row[2]), int(row[3])
+        row = (res.get("results") or [[0, 0, 0, 0, 0]])[0]
+        odds, sessions, chat_err, exceptions, users = int(row[0]), int(row[1]), int(row[2]), int(row[3]), int(row[4])
     except urllib.error.HTTPError as e:
         return {"status": True, "data": {"health": {"edge": "surface<->users", "error": "posthog HTTP %s" % e.code}, "verdict": "unknown", "heal_needed": False}}
     except Exception as e:
         return {"status": True, "data": {"health": {"edge": "surface<->users", "error": str(e)[:150]}, "verdict": "unknown", "heal_needed": False}}
+    errs = chat_err + exceptions
+    ops = (odds / sessions) if sessions else 0.0
+    eps = (errs / sessions) if sessions else 0.0
     opu = (odds / users) if users else 0.0
-    epu = (chat_err / users) if users else 0.0
-    if users < traffic_floor:
+    epu = (errs / users) if users else 0.0
+    if sessions < session_floor:
         verdict = "low_traffic"
-    elif epu > err_ceiling:
+    elif eps > err_ceiling:
         verdict = "degraded:errors"
-    elif opu < odds_floor:
+    elif ops < odds_floor:
         verdict = "degraded:odds"
     else:
         verdict = "ok"
     heal = verdict == "degraded:odds"
-    health = {"edge": "surface<->users", "window_hours": hours, "users": users,
+    health = {"edge": "surface<->users", "window_hours": hours, "sessions": sessions, "users": users,
               "odds_viewed": odds, "chat_err": chat_err, "exceptions": exceptions,
+              "odds_per_session": round(ops, 5), "err_per_session": round(eps, 5),
               "odds_per_user": round(opu, 5), "err_per_user": round(epu, 5),
               "verdict": verdict, "heal_needed": heal, "source": "posthog"}
     return {"status": True, "data": {"health": health, "verdict": verdict, "heal_needed": heal}}
@@ -212,7 +223,7 @@ def definitions():
     # self-evolving: a scheduled sweep of the live surface. INACTIVE by default — set
     # status:active + tune config-frequency to enable continuous defense (shared pod).
     beat = {"name": "surface-watch-beat", "title": "Surface Watch Beat", "status": "inactive",
-            "scheduled": True, "description": "continuous live-surface defense (set status:active to enable)",
+            "scheduled": False, "description": "continuous live-surface defense (set status:active to enable)",
             "context": {"config-frequency": 30}, "context-agent": {"window_hours": "$.get('window_hours', 6)"},
             "workflows": [{"name": "surface-verify", "description": "surface<->users defense",
                            "inputs": {"window_hours": "$.get('window_hours', 6)"},
