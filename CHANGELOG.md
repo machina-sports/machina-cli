@@ -2,6 +2,15 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.7] - 2026-06-30
+
+### Added
+- **The harness loop can now read documents and real conversations.** Its tool catalog gained `read_documents` (read any document on the project pod by name — copilot threads, harness sessions, fixtures, config docs, via the same `document_search` the MCP uses) and `fetch_conversations` (recent real SportingBOT end-user chat transcripts from PostHog — user context + bot answer + category, read from `posthog.ai_events`). Before, the loop only had `find_fixtures`/`calculate`/`get_datetime`/`echo`, so "analyse the recent chats and suggest bot improvements" got "give me the logs"; it now pulls live transcripts and returns grounded, evaluator-checked findings. (#41)
+
+### Fixed
+- **`machina login --api-key` no longer discards a valid key.** The key was verified against `login/session`, which returns 5xx for API-key auth; the client read that as "key invalid", deleted the just-stored key, and silently fell back to the session token (printing "Authenticated as Unknown"). The client now never clears the key on a 5xx — it falls back for the current request only, and only when a session-token retry actually succeeds — and `login --api-key` verifies without that fallback and reports an honest result. The key is always kept. (#42)
+- **Release pipeline no longer ships empty releases.** The `github-release` CI step used `gh release create`, which errors when the release already exists (e.g. cut from the GitHub UI, which also creates the triggering tag) and then dies before attaching the binaries. It is now idempotent — create, or upload assets onto the existing release. (#43)
+
 ## [0.4.4] - 2026-06-30
 
 ### Fixed
