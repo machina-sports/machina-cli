@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.4] - 2026-06-30
+
+### Fixed
+- **`machina org usage` shows a readable label for nameless project stubs.** Some `user/projects/search` records are bare membership stubs (`project_id` only, no `project_name` — e.g. a deleted project's leftover association); they were rendered as a raw 24-char ObjectId in the "Skipped" line. They now show `(unnamed:<id8>)`. The project is still scanned (never silently excluded over a missing name), so a real project can't be dropped this way.
+
 ## [0.4.3] - 2026-06-30
 
 ### Fixed

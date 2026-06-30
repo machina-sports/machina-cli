@@ -169,8 +169,12 @@ def _resolve_org_projects(org_id: str) -> list[tuple[str, str]]:
         for proj in rows:
             if proj.get("organization_id") != org_id:
                 continue
-            pid = proj.get("project_id", proj.get("_id", ""))
-            pname = proj.get("project_name", proj.get("name", pid))
+            pid = proj.get("project_id") or proj.get("_id") or ""
+            # Some membership records are bare stubs (project_id only, no name — e.g. a
+            # deleted project's leftover association). Show a readable label instead of a
+            # raw 24-char ObjectId, but still scan them so a real project is never
+            # silently dropped just because its name didn't resolve.
+            pname = proj.get("project_name") or proj.get("name") or f"(unnamed:{pid[:8]})"
             if pid and proj.get("status") != "archived":
                 targets.append((pid, pname))
         pagination = res.get("pagination", {})
