@@ -112,7 +112,15 @@ machina org list --page 2              # Page 2
 machina org list --json                # Output as JSON
 machina org create <name>              # Create organization
 machina org use <org-id>               # Set default organization
+machina org usage                      # Token consumption (last 30d), by project/agent/day
+machina org usage --days 7             # Narrow the window
+machina org usage --project <id>       # Scope to one project (faster)
+machina org usage --json               # Output as JSON
 ```
+
+`org usage` rolls up LLM token consumption from agent executions (`execution_tokens`)
+across the organization's projects — broken down by project, agent, and day, with the
+prompt/completion split. Useful for cost/capacity tracking.
 
 ### Projects
 
