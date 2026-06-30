@@ -23,7 +23,7 @@ What it creates (maps to the Loop-Engineering five moves — see VALIDATION.md):
     prompt    loop-evaluate    INDEPENDENT verifier: judge the answer        (verification)
     prompt    loop-repair      bounded self-repair of a rejected answer      (Cap 8.2)
     prompt    loop-evaluate-2  re-verify the repaired answer                 (Cap 8.2)
-    connector loop-tools       dispatcher: calculate / get_datetime / echo / find_fixtures
+    connector loop-tools       dispatcher: calculate / get_datetime / echo / find_fixtures / read_documents / fetch_conversations
     workflow  loop-turn        load -> ingest -> reason -> tool -> respond -> EVALUATE -> [repair -> re-eval] -> finalize
     workflow  loop-resume      beat path: resume an orphaned `active` session  (scheduling)
     agent     loop-runner      executor path (inactive; CLI/MCP invokes it)
@@ -98,7 +98,7 @@ def _create(kind, body):
 # --- loop-tools connector source (pyscript, exec'd from the DB at call time) ---
 # Returns {status: True, data: {...}} — the connector contract; a bare dict is
 # treated as a FAILED connector. Inputs arrive under request_data['params'].
-LOOP_TOOLS_SRC = r'''"""Machina Loop Tools — meta-dispatcher (calculate/get_datetime/echo/find_fixtures)."""
+LOOP_TOOLS_SRC = r'''"""Machina Loop Tools — meta-dispatcher (calculate/get_datetime/echo/find_fixtures/read_documents/fetch_conversations)."""
 import ast, json, operator
 from datetime import datetime, timezone
 _OPS={ast.Add:operator.add,ast.Sub:operator.sub,ast.Mult:operator.mul,ast.Div:operator.truediv,ast.Pow:operator.pow,ast.Mod:operator.mod,ast.USub:operator.neg,ast.UAdd:operator.pos,ast.FloorDiv:operator.floordiv}
@@ -136,6 +136,78 @@ def _find_fixtures(a):
                     "home_analysis":(tf.get("home") or {}).get("analysis","")[:300] if v.get("has_pre_match_research") else "",
                     "away_analysis":(tf.get("away") or {}).get("analysis","")[:300] if v.get("has_pre_match_research") else ""})
     return out if out else "no upcoming fixtures found"+((" for team "+team) if team else "")
+def _read_documents(a):
+    # General doc reader: reads recent documents on THIS pod by exact name, using the
+    # SAME core.document.controller the MCP uses. Gives the loop eyes on its own pod
+    # (copilot-thread, harness_session, sportradar-fixture, config docs, ...).
+    try:
+        from core.document.controller import document_search
+    except Exception as ex:
+        return "read_documents unavailable: "+str(ex)
+    name=str(a.get("name","")).strip()
+    if not name:
+        return "read_documents needs name (e.g. copilot-thread, harness_session, sportradar-fixture)"
+    try: limit=int(a.get("limit",5))
+    except Exception: limit=5
+    contains=str(a.get("contains","")).strip().lower()
+    r=document_search(filters={"name":name},page=1,page_size=max(1,min(limit,10)),sorters=["created",-1])
+    dd=r.get("data") if isinstance(r,dict) else None
+    docs=dd.get("data") if isinstance(dd,dict) else (dd if isinstance(dd,list) else [])
+    out=[]
+    for d in (docs or []):
+        s=json.dumps(d.get("value",{}) or {},ensure_ascii=False,default=str)
+        if contains and contains not in s.lower(): continue
+        out.append({"name":d.get("name"),"created":str(d.get("created","")),"value":s[:900]})
+    return out if out else ("no '"+name+"' documents found")
+def _fetch_conversations(a):
+    # Real SportingBOT end-user chats from PostHog. Verbatim text lives on the
+    # posthog.ai_events table (input/output_choices, anchored on trace_id, 30d retention);
+    # events carries only metadata. Key read from the posthog-surface-config doc (same as
+    # the surface-verify defense). Returns recent (user-context, bot-answer, category).
+    import urllib.request
+    try:
+        from core.document.controller import document_search
+    except Exception as ex:
+        return "fetch_conversations unavailable: "+str(ex)
+    key=""; pid_doc=""
+    try:
+        r=document_search(filters={"name":"posthog-surface-config"},page=1,page_size=1)
+        dd=r.get("data") if isinstance(r,dict) else None
+        docs=dd.get("data") if isinstance(dd,dict) else (dd if isinstance(dd,list) else [])
+        if docs:
+            v=docs[0].get("value",{}) or {}
+            key=v.get("query_key","") or v.get("posthog_query_key","") or v.get("key","") or v.get("posthog_key","")
+            pid_doc=str(v.get("project","") or "")
+    except Exception as ex:
+        return "fetch_conversations: cannot read posthog key: "+str(ex)
+    if not key or str(key).startswith("$"):
+        return "fetch_conversations: no posthog key in posthog-surface-config doc"
+    pid=str(a.get("project_id") or pid_doc or "257767").strip() or "257767"
+    try: limit=int(a.get("limit",4))
+    except Exception: limit=4
+    limit=max(1,min(limit,6))
+    cat=str(a.get("category","")).replace("'","").strip()
+    catf=("AND properties.sbot_category = '"+cat+"' ") if cat else ""
+    q=("WITH t AS (SELECT properties.$ai_trace_id AS tid, properties.sbot_category AS cat, timestamp AS ts "
+       "FROM events WHERE event='$ai_generation' AND timestamp >= now() - INTERVAL 72 HOUR "
+       "AND properties.$ai_trace_id != '' "+catf+
+       "ORDER BY timestamp DESC LIMIT "+str(limit)+") "
+       "SELECT t.cat AS category, right(toString(a.input),260) AS user_ctx, "
+       "substring(toString(a.output_choices),1,300) AS bot "
+       "FROM posthog.ai_events AS a INNER JOIN t ON a.trace_id=t.tid "
+       "ORDER BY t.ts DESC LIMIT "+str(limit))
+    body=json.dumps({"query":{"kind":"HogQLQuery","query":q}}).encode()
+    req=urllib.request.Request("https://us.posthog.com/api/projects/"+pid+"/query/",data=body,
+        headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
+    try:
+        with urllib.request.urlopen(req,timeout=45) as resp:
+            data=json.loads(resp.read() or "{}")
+    except Exception as ex:
+        return "fetch_conversations posthog error: "+str(ex)[:160]
+    out=[]
+    for row in (data.get("results") or []):
+        out.append({"category":row[0],"user_ctx":(row[1] or "")[:240],"bot":(row[2] or "")[:240]})
+    return out if out else "no recent conversations found"
 def dispatch(request_data: dict) -> dict:
     p=request_data.get("params",{}) or request_data
     tool=(p.get("tool_name") or "").strip()
@@ -145,17 +217,23 @@ def dispatch(request_data: dict) -> dict:
     except Exception:
         args={}
     if tool=="find_fixtures": r=_find_fixtures(args)
+    elif tool=="read_documents": r=_read_documents(args)
+    elif tool=="fetch_conversations": r=_fetch_conversations(args)
     elif tool=="get_datetime": r=datetime.now(timezone.utc).strftime("%A, %d %B %Y, %H:%M UTC")
     elif tool=="calculate": r=_calc(args)
     elif tool=="echo": r=str(args.get("text",""))
     else: r="unknown tool: "+tool
     return {"status": True, "data": {"tool_result": json.dumps(r, ensure_ascii=False, default=str)[:2800],
-                                     "tool_ok": tool in ("find_fixtures","get_datetime","calculate","echo")}}
+                                     "tool_ok": tool in ("find_fixtures","read_documents","fetch_conversations","get_datetime","calculate","echo")}}
 '''
 
 CATALOG = [
     {"name": "find_fixtures", "params_hint": "team(str), limit(int=5)",
      "description": "Upcoming football fixtures (real project data) + AI pre-match analysis. Use for schedule / who-plays / pre-match questions."},
+    {"name": "read_documents", "params_hint": "name*(str), limit(int=5), contains(str?)",
+     "description": "Read recent documents stored on THIS project pod by exact name (e.g. copilot-thread, harness_session, sportradar-fixture, config docs). Use to inspect saved conversations/state on the pod before answering."},
+    {"name": "fetch_conversations", "params_hint": "limit(int=4), category(str?)",
+     "description": "Recent REAL SportingBOT end-user chat transcripts from PostHog (user context + bot answer + category). Use to analyze conversation quality and suggest concrete bot improvements."},
     {"name": "calculate", "params_hint": "expression*(str)", "description": "Evaluate arithmetic; never compute it yourself."},
     {"name": "get_datetime", "params_hint": "(no args)", "description": "Current UTC date/time."},
     {"name": "echo", "params_hint": "text*(str)", "description": "Echo text back verbatim."},
@@ -247,6 +325,8 @@ REASON_INSTR = (
     "- For ANY math -> needs_tool_call=true, call calculate {expression}. Never compute yourself.\n"
     "- For current date/time -> call get_datetime.\n"
     "- For upcoming matches / schedule / pre-match analysis -> call find_fixtures {team?, limit?}.\n"
+    "- To inspect saved documents/conversations/state on this pod (copilot-thread, harness_session, fixtures, config) -> call read_documents {name, limit?, contains?}.\n"
+    "- To analyze recent SportingBOT user chats or suggest bot improvements -> call fetch_conversations {limit?, category?}.\n"
     "- To repeat text -> call echo {text}.\n"
     "- Otherwise answer directly: needs_tool_call=false.\n"
     "name = exact tool from _3-available-tools; arguments_json = JSON-stringified args ('{}' if none). short_message = 1 line.")
