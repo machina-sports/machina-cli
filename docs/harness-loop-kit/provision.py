@@ -469,7 +469,11 @@ def definitions():
                              "outputs": {"session_id": "$.get('session_id')", "assistant_message": "$.get('assistant_message','')"}}]}
     # loop-beat is the durability tick (scheduling move). Created INACTIVE so it
     # does not run in a shared pod until a reviewer opts in by setting status:active.
-    beat = {"name": "loop-beat", "title": "Loop Beat", "status": "inactive", "scheduled": True,
+    # NOTE scheduled=False: the platform's frequency beat (_tick_legacy_agent_frequency)
+    # only dispatches agents with scheduled=False + status=active + config-frequency.
+    # scheduled=True marks an agent as cron-driven (needs a real schedule) and, without
+    # one, it is silently NEVER dispatched — so a freq-based beat MUST be scheduled=False.
+    beat = {"name": "loop-beat", "title": "Loop Beat", "status": "inactive", "scheduled": False,
             "description": "durability tick: resume orphaned active sessions (set status:active to enable)",
             "context": {"config-frequency": 0.5}, "context-agent": {},
             "workflows": [{"name": "loop-resume", "description": "resume an orphaned active session", "inputs": {}, "outputs": {"resumed_session": "$.get('resumed_session')"}}]}
