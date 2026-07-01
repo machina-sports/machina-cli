@@ -35,8 +35,9 @@ def test_detect_heal_recover_arc():
     events = _events_from_history(docs, [])
     kinds = [(e["event"], e["ts"].hour) for e in events]
     assert kinds == [("detected", 11), ("heal", 11), ("heal", 12), ("recovered", 13)]
-    # recovery reports the immediately-prior reading (7), not the incident peak
-    assert "was 7" in events[-1]["detail"]
+    # recovery reports the incident PEAK (13), not the immediately-prior drained
+    # reading (7) — "was 1" after a 13->...->1 drain hides the story from the reader
+    assert "peaked at 13" in events[-1]["detail"]
     assert "+1 queued" in events[1]["detail"]
 
 
@@ -81,6 +82,19 @@ def test_edges_are_isolated():
     ]
     events = _events_from_history(docs, [])
     assert len(events) == 1 and events[0]["edge"] == "analysis<->fixture"
+
+
+def test_second_incident_peak_does_not_inherit_the_first():
+    docs = [
+        _health_doc("Wed, 01 Jul 2026 10:00:00 GMT", "analysis<->fixture", 13),
+        _health_doc("Wed, 01 Jul 2026 11:00:00 GMT", "analysis<->fixture", 0),
+        _health_doc("Wed, 01 Jul 2026 12:00:00 GMT", "analysis<->fixture", 2),
+        _health_doc("Wed, 01 Jul 2026 13:00:00 GMT", "analysis<->fixture", 0),
+    ]
+    events = _events_from_history(docs, [])
+    recoveries = [e for e in events if e["event"] == "recovered"]
+    assert "peaked at 13" in recoveries[0]["detail"]
+    assert "peaked at 2" in recoveries[1]["detail"]
 
 
 def test_surface_transitions_and_heal():

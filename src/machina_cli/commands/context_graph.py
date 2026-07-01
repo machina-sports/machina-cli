@@ -215,7 +215,10 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
     for edge, rows in per_edge.items():
         rows.sort(key=lambda r: r[0])
         prev_broken = 0
+        peak = 0  # incident peak, so a drained recovery reads "peaked at 13", not "was 1"
         for ts, broken, healed in rows:
+            if broken > 0:
+                peak = max(peak, broken)
             if broken > 0 and prev_broken == 0:
                 events.append({"ts": ts, "edge": edge, "event": "detected", "detail": f"{broken} broken"})
             if (healed.get("heal_count") or 0) > 0:
@@ -228,7 +231,8 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                                "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human"})
             if broken == 0 and prev_broken > 0:
                 events.append({"ts": ts, "edge": edge, "event": "recovered",
-                               "detail": f"back to 0 broken (was {prev_broken})"})
+                               "detail": f"back to 0 broken (incident peaked at {peak})"})
+                peak = 0
             prev_broken = broken
 
     # live surface (surface<->users)

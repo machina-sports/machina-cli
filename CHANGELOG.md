@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.6.1] - 2026-07-01
+
+### Fixed
+- **Slack + timeline messages now tell the whole incident, in plain language.** User feedback from the first live heal cycle: the recovered message said "Back to 0 broken (was 1)" after a 13→10→7→4→1→0 drain — the last reading, not the story — and neither message explained what the error *means* or how the fix works. The recovered message now walks the incident's history: "the incident peaked at 13; auto-heal re-researched 22 fixture(s) across 5 round(s) (fresh web search + AI extraction per fixture), no human needed." The detected message now opens with what users are actually seeing ("N match page(s) are showing a pre-match analysis that belongs to a DIFFERENT match") before the LLM's concrete example, and states how the heal works. `context-graph timeline`'s recovered event likewise reports the incident peak.
+
 ## [0.6.0] - 2026-07-01
 
 ### Added
