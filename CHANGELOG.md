@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.9] - 2026-07-01
+
+### Fixed
+- **`machina context-graph status --org` no longer leaks per-project errors.** Projects that are unreachable or forbidden made `ProjectClient` print `Error authenticating project` / `Client API error.` / `Cannot reach Client API …` before raising — which cluttered the table and corrupted `--json` output. The org rollup now silences per-project stderr and skips those projects cleanly (counted in `skipped`), so `--json` stays valid.
+
 ## [0.4.8] - 2026-06-30
 
 ### Added
