@@ -363,6 +363,12 @@ def main():
             print(f"  removed {kind}/{body['name']}")
         return
     print(f"Provisioning surface-verify on {BASE} (posthog project={PH_PROJECT}) ...")
+    # CAUTION when re-running against a pod where the beat was since promoted to
+    # active (e.g. via a direct PUT /agent/<id>): `beat` above defaults to
+    # status="inactive", so this overwrites it back off. If surface-watch-beat is
+    # live in this pod, re-activate it after provisioning (or provision just the
+    # connector + workflow entries, skipping the agent, to update the code without
+    # touching the running beat's status).
     ok = all(_create(kind, body) for kind, body in defs)
     if SLACK_WEBHOOK_URL:
         # Same posture as the PostHog key: a config document notify_slack reads at
