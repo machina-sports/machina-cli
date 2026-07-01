@@ -23,9 +23,18 @@ The PostHog read key lives in the pod VAULT as POSTHOG_QUERY_KEY (never in code)
 injected via $TEMP_CONTEXT_VARIABLE_POSTHOG_QUERY_KEY. Read-only against PostHog; the only
 write is the optional odds heal (re-running entain-coverage-fut-refresh-markets, idempotent).
 
+Slack awareness: on every scan, a Slack message fires on a verdict TRANSITION only --
+entering a degraded state (self-healed, or "needs a human" when no heal applies/fired),
+or recovering back to ok. An unchanged ongoing state never re-notifies (the Studio/CLI
+dashboards already show that continuously) -- so the channel only gets pinged for news.
+The webhook lives in a `slack-notify-config` document (or $TEMP_CONTEXT_VARIABLE_
+SLACK_WEBHOOK_URL, same posture as the PostHog key); provision it by setting
+SLACK_WEBHOOK_URL when running this script.
+
 Usage (run from inside the enrichment pod, like context-verify.py):
     CLIENT_API_URL="http://localhost:5003" API_TOKEN="$MACHINA_PROJECT_KEY" \\
-    python3 surface-verify.py            # provision
+    SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..." \\
+    python3 surface-verify.py            # provision (+ upsert the Slack config if set)
     python3 surface-verify.py --run      # provision + run one surface check
     python3 surface-verify.py --teardown # remove
 """
@@ -40,6 +49,7 @@ import urllib.error
 BASE = os.environ.get("CLIENT_API_URL", "").rstrip("/")
 TOKEN = os.environ.get("API_TOKEN", "")
 PH_PROJECT = os.environ.get("POSTHOG_PROJECT_ID", "257767")
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
 
 
 def _req(method, path, body=None):
@@ -177,6 +187,83 @@ def trigger_odds_heal(request_data):
         except Exception as e:
             out.append({"season_id": sid, "error": str(e)[:120]})
     return {"status": True, "data": {"healed": out, "heal_count": len(out)}}
+
+def notify_slack(request_data):
+    """Post to Slack on a verdict TRANSITION only -- entering a degraded state, or
+    recovering from one. Never repeats an alert for an unchanged ongoing state (the
+    Studio/CLI dashboards already show that continuously), so the channel only gets
+    pinged for news. Read-only against PostHog; the Slack POST is best-effort and
+    never raises (a notify failure must never fail the surface-verify workflow)."""
+    p = request_data.get("params", {}) or request_data
+    verdict = p.get("verdict", "unknown")
+    webhook = (p.get("webhook_url") or "").strip()
+    if not webhook or webhook.startswith("$"):
+        try:
+            from core.document.controller import document_search
+            r = document_search(filters={"name": "slack-notify-config"}, page=1, page_size=1)
+            dd = r.get("data") if isinstance(r, dict) else None
+            rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+            if rows:
+                webhook = ((rows[0].get("value") or {}).get("webhook_url") or "").strip()
+        except Exception:
+            pass
+    if not webhook:
+        return {"status": True, "data": {"notified": False, "skipped": "no webhook configured"}}
+
+    # This task runs BEFORE save-health persists the current scan's doc, so this
+    # search returns the PREVIOUS scan's verdict -- exactly what's needed to tell
+    # a transition from an unchanged ongoing state.
+    prev_verdict = None
+    try:
+        from core.document.controller import document_search
+        r = document_search(filters={"name": "context_graph_surface_health"}, page=1, page_size=1)
+        dd = r.get("data") if isinstance(r, dict) else None
+        rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+        if rows:
+            prev_verdict = (rows[0].get("value") or {}).get("verdict")
+    except Exception:
+        pass
+
+    degraded = ("degraded:odds", "degraded:errors")
+    if verdict not in degraded:
+        if prev_verdict in degraded:
+            text = (":white_check_mark: *Context Graph -- recovered*\n"
+                    ">Live surface is back to `%s` (was `%s`)." % (verdict, prev_verdict))
+        else:
+            return {"status": True, "data": {"notified": False, "skipped": "no transition"}}
+    else:
+        if prev_verdict == verdict:
+            return {"status": True, "data": {"notified": False, "skipped": "unchanged degraded state"}}
+        health = p.get("health") or {}
+        healed = p.get("healed") or {}
+        heal_items = healed.get("healed") if isinstance(healed, dict) else None
+        heal_ok = bool(heal_items) and not any(isinstance(h, dict) and h.get("error") for h in (heal_items or []))
+        if verdict == "degraded:odds" and heal_ok:
+            headline = ":adhesive_bandage: *Context Graph -- self-healed*"
+            body = ("Odds looked broken to users -- auto-heal re-triggered the odds refresh "
+                     "automatically. Flagging for visibility, no action needed.")
+        elif verdict == "degraded:odds":
+            headline = ":rotating_light: *Context Graph -- could NOT self-heal*"
+            body = ("Odds looked broken to users and the auto-heal (odds refresh) didn't run "
+                     "or errored. *Needs a human.*")
+        else:
+            headline = ":rotating_light: *Context Graph -- needs review*"
+            body = ("Chat error rate spiked for users -- not fixable by auto-heal (likely a "
+                     "code regression). *Needs a human.*")
+        sig = ("sessions=%s . odds/session=%s . err/session=%s . exceptions=%s . window=%sh"
+               % (health.get("sessions"), health.get("odds_per_session"), health.get("err_per_session"),
+                  health.get("exceptions"), health.get("window_hours")))
+        text = "%s\n>%s\n>`%s`" % (headline, body, sig)
+
+    body_bytes = json.dumps({"text": text}).encode()
+    req = urllib.request.Request(webhook, data=body_bytes, method="POST",
+                                  headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
+        return {"status": True, "data": {"notified": True, "verdict": verdict, "prev_verdict": prev_verdict}}
+    except Exception as e:
+        return {"status": True, "data": {"notified": False, "error": str(e)[:150]}}
 '''
 
 SURFVAL = ("{'edge':'surface<->users','verdict':$.get('sv_verdict','unknown'),"
@@ -207,6 +294,17 @@ def _workflow():
                  "inputs": {"heal_needed": "$.get('sv_heal', False)",
                             "season_ids": "$.get('season_ids', ['sr:season:101177'])"},
                  "outputs": {"sv_healed": "$"}},
+                # runs before save-health so it still reads the PREVIOUS scan's
+                # verdict (for transition detection) -- see notify_slack docstring.
+                # Always runs (no condition): it also fires the "recovered" message,
+                # which only makes sense when heal_needed is False.
+                {"name": "notify", "type": "connector",
+                 "connector": {"command": "notify_slack", "name": "surface-verify-tools"},
+                 "inputs": {"verdict": "$.get('sv_verdict', 'unknown')",
+                            "health": "$.get('sv_health', {})",
+                            "healed": "$.get('sv_healed', {})",
+                            "webhook_url": "$TEMP_CONTEXT_VARIABLE_SLACK_WEBHOOK_URL"},
+                 "outputs": {"sv_notified": "$"}},
                 {"name": "save-health", "type": "document",
                  "config": {"action": "save", "embed-vector": False, "force-update": True},
                  "documents": {"context_graph_surface_health": SURFVAL}},
@@ -218,7 +316,8 @@ def definitions():
              "description": "PostHog live-surface scanner + odds heal trigger",
              "filename": "surface_verify.py", "filetype": "pyscript", "filecontent": SCAN_SRC,
              "commands": [{"name": "ScanSurface", "value": "scan_surface"},
-                          {"name": "TriggerOddsHeal", "value": "trigger_odds_heal"}]}
+                          {"name": "TriggerOddsHeal", "value": "trigger_odds_heal"},
+                          {"name": "NotifySlack", "value": "notify_slack"}]}
     wf = _workflow()
     # self-evolving: a scheduled sweep of the live surface. INACTIVE by default — set
     # status:active + tune config-frequency to enable continuous defense (shared pod).
@@ -265,6 +364,12 @@ def main():
         return
     print(f"Provisioning surface-verify on {BASE} (posthog project={PH_PROJECT}) ...")
     ok = all(_create(kind, body) for kind, body in defs)
+    if SLACK_WEBHOOK_URL:
+        # Same posture as the PostHog key: a config document notify_slack reads at
+        # runtime, not baked into the workflow. Re-running provisioning updates it
+        # (idempotent, like every other resource in `defs`).
+        _create("document", {"name": "slack-notify-config", "status": "active",
+                              "value": {"webhook_url": SLACK_WEBHOOK_URL}})
     print("\nDone." if ok else "\nDone with errors — check output above.")
     if "--run" in sys.argv:
         _run_once()
