@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.4] - 2026-07-01
+
+### Fixed
+- **`surface-verify`'s odds-heal now has a retry budget.** `trigger_odds_heal` re-runs `entain-coverage-fut-refresh-markets` — a real 15-step workflow that calls the live bwin API — on every `degraded:odds` scan, with no limit on how many times a stuck incident could re-trigger it. It now stops after `max_heal_attempts` (default 3) **consecutive** `degraded:odds` scans, read from the persisted health-doc history (each scan is a fresh, memory-less process), and hands off to a human via Slack ("could NOT self-heal ... needs a human") instead of continuing to re-trigger the workflow. A prior recovery resets the count, so an old resolved incident never counts against a new one. Investigated 2026-07-01: `heal_needed` had never actually fired in `enrichment-production`'s history (0/39 scans) — the gap was latent, not yet a real incident.
+
 ## [0.5.3] - 2026-07-01
 
 ### Added
