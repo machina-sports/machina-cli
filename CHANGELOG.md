@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.2] - 2026-07-01
+
+### Added
+- **`surface-verify` threshold overrides** (`session_floor` / `odds_floor` / `err_ceiling` as workflow inputs, defaulting to the calibrated values — the recurring beat is unaffected). Lets a verdict be forced on demand for testing; used to prove 0.5.1's Slack notify end-to-end against the live `enrichment-production` pod without touching the odds-heal side effect. Note: the workflow engine's `$.get(key, default)` treats `0` as "not provided" — use a small non-zero override (e.g. `0.001`), not `0.0`.
+
 ## [0.5.1] - 2026-07-01
 
 ### Added
