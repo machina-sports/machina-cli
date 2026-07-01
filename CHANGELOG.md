@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.6.2] - 2026-07-01
+
+### Fixed
+- **The analysis audit no longer alerts on — or heals — matches that were already played.** User question after the first live cycle: *why is it looking at these matches when the championship is paused?* Root cause: the scan audits the newest researched fixture documents with no notion of time, and during the World Cup pause those are all finished games — the first heal cycle re-researched 22 already-played Copa do Brasil/friendly fixtures (real cost, no reader: nobody reads a pre-match analysis for a finished match). Now `broken_edges` (the alerting/healing metric) covers only groups touching at least one not-yet-played fixture; fully-played groups are counted separately as `broken_played_edges` (archival integrity debt — reported in messages as a note, never paged, never healed). Heal dispatches exclude finished fixtures even in mixed groups; missing/unknown status still counts as relevant so a possibly-live page is never hidden.
+
 ## [0.6.1] - 2026-07-01
 
 ### Fixed

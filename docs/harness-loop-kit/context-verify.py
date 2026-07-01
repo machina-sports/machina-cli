@@ -242,8 +242,20 @@ def _pairing(v):
                     return o.get("home_team"), o.get("away_team")
     return None, None
 
+# A finished match's pre-match analysis is dead content: nobody reads it as a preview
+# anymore, so a misattribution there is archival debt, not a live incident -- and
+# re-researching it is pure cost. Learned live on SBOT Prd during the World Cup pause:
+# the 500 newest researched fixtures were ALL closed (paused league), and the first heal
+# cycle re-researched 22 already-played matches. Missing/unknown status counts as
+# relevant (never hide a possibly-live page).
+FINISHED_STATUSES = ("closed", "ended", "cancelled")
+
 def scan_edges(request_data: dict) -> dict:
-    """analysis <-> fixture: distinct matches can't share an identical pre-match analysis."""
+    """analysis <-> fixture: distinct matches can't share an identical pre-match analysis.
+
+    Alerting/healing metric (broken_edges) covers only groups touching at least one
+    not-yet-played fixture; groups made entirely of finished matches are counted
+    separately (broken_played_edges) -- real integrity debt, but no live page to fix."""
     p = request_data.get("params", {}) or request_data
     try: docs = _docs("sportradar-fixture", {"value.has_pre_match_research": True}, _limit(p))
     except Exception as ex:
@@ -254,21 +266,30 @@ def scan_edges(request_data: dict) -> dict:
         tf = (v.get("pre_match_research") or {}).get("team_form") or {}
         ha = ((tf.get("home") or {}).get("analysis") or "").strip()
         title = re.sub(r"\s*\(\d+\)\s*$", "", str(v.get("title") or "")).strip()
-        if ha and title: enriched.append((title, v.get("sport_event_id"), re.sub(r"\s+", " ", ha.lower())[:160]))
-    groups = defaultdict(set); group_ids = defaultdict(set)
-    for title, sid, key in enriched:
+        if ha and title:
+            finished = str(v.get("status") or "").lower() in FINISHED_STATUSES
+            enriched.append((title, v.get("sport_event_id"), finished, re.sub(r"\s+", " ", ha.lower())[:160]))
+    groups = defaultdict(set); group_ids = defaultdict(set); group_live_ids = defaultdict(set)
+    for title, sid, finished, key in enriched:
         groups[key].add(title)
-        if sid: group_ids[key].add(sid)
+        if sid:
+            group_ids[key].add(sid)
+            if not finished: group_live_ids[key].add(sid)
     collapsed = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
-    broken = sum(len(v) - 1 for v in collapsed.values())
-    # fixture_ids feed the auto-heal: EVERY fixture in a collapsed group gets re-researched
-    # (we can't tell which one rightfully owns the analysis; re-researching the owner too is
-    # harmless -- it just gets a fresh, correct analysis of its own).
-    flagged = [{"fixtures": v, "fixture_ids": sorted(group_ids.get(k, set())), "analysis": k[:120]}
-               for k, v in list(collapsed.items())[:10]]
+    live_groups = {k: v for k, v in collapsed.items() if group_live_ids.get(k)}
+    played_groups = {k: v for k, v in collapsed.items() if not group_live_ids.get(k)}
+    broken = sum(len(v) - 1 for v in live_groups.values())
+    broken_played = sum(len(v) - 1 for v in played_groups.values())
+    # fixture_ids feed the auto-heal: only the NOT-YET-PLAYED fixtures of live groups get
+    # re-researched (we can't tell which fixture rightfully owns the analysis, and
+    # re-researching a live owner is harmless -- but re-researching a finished match is
+    # cost with no reader).
+    flagged = [{"fixtures": v, "fixture_ids": sorted(group_live_ids.get(k, set())), "analysis": k[:120]}
+               for k, v in list(live_groups.items())[:10]]
     n = len(enriched)
     health = {"edge": "analysis<->fixture", "sampled": n, "collapsed_groups": len(collapsed),
-              "broken_edges": broken, "broken_rate_pct": round(100 * broken / n) if n else 0}
+              "broken_edges": broken, "broken_played_edges": broken_played,
+              "broken_rate_pct": round(100 * broken / n) if n else 0}
     return {"status": True, "data": {"health": health, "flagged": flagged, "heal_needed": broken > 0}}
 
 def scan_odds(request_data: dict) -> dict:
@@ -564,9 +585,11 @@ def notify_slack(request_data: dict) -> dict:
     # Plain-language meaning of a broken edge, so the reader doesn't need to know the
     # edge taxonomy to understand what users are actually seeing.
     meaning = {
-        "analysis<->fixture": "%s match page(s) are showing a pre-match analysis that belongs to a DIFFERENT match.",
+        "analysis<->fixture": "%s upcoming match page(s) are showing a pre-match analysis that belongs to a DIFFERENT match.",
         "odd<->market<->fixture": "%s market(s) reference odds/options from the wrong fixture.",
     }.get(edge, "%s record(s) are attributed to the wrong entity.")
+    played = health.get("broken_played_edges") or 0
+    played_note = (" (%s more on already-played matches -- archival debt, not healed)" % played) if played else ""
 
     assessment = (p.get("assessment") or "").strip()
     if is_broken and budget_exceeded:
@@ -578,13 +601,13 @@ def notify_slack(request_data: dict) -> dict:
         backlog = healed.get("backlog") or 0
         tail = " (%d more queued for the next scans)" % backlog if backlog else ""
         headline = ":adhesive_bandage: *Context Graph -- data issue found, self-healing* (`%s`)" % edge
-        body = (meaning % count) + \
+        body = (meaning % count) + played_note + \
                (("\n>" + assessment) if assessment else "") + \
                ("\n>Auto-heal is re-researching each affected fixture (fresh web search + AI extraction "
                 "replaces the misattributed text) -- %d dispatched%s; the next scans verify." % (heal_count, tail))
     elif is_broken:
         headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
-        body = (meaning % count) + \
+        body = (meaning % count) + played_note + \
                (("\n>" + assessment) if assessment else "") + \
                "\n>*Needs a human* -- auto-heal is not configured for this edge here."
     else:
