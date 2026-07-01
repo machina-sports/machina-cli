@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.4.8] - 2026-06-30
+
+### Added
+- **`machina context-graph status`** — see the self-healing / monitoring layer from the CLI (the same truth the Studio Context Graph page shows). Per project it lists the verified edges + health (e.g. `market → team linked 52.5%`, `market ↔ price quality degraded 34.1%`), the live surface verdict (odds/errors, with session-normalized signals + exception count), and the self-heal agents with their beat status — and warns when a beat is `active` but `scheduled=True` (silently not firing). `--org` rolls it up across every project in the org; `--json` for scripts. Answers "what self-healing is running, where, and how healthy" without opening each project one by one.
+
 ## [0.4.7] - 2026-06-30
 
 ### Added
