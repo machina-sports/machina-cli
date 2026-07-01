@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.7] - 2026-07-01
+
+### Added
+- **`context-verify` posts to Slack on a data-integrity transition.** The two edges with a `broken_rate_pct` verdict (`analysis<->fixture`, `odd<->market<->fixture`) now post when that edge goes from clean to broken, or back — reusing the eval prompt's own assessment text as the message body (already a specific, human-written summary — e.g. "an analysis regarding Vitória vs Flamengo being incorrectly attributed to..."). Silent while an already-flagged issue stays open. Shares the same `slack-notify-config` webhook as `surface-verify.py` — one webhook per pod covers both. The linkability edge (`market->fixture(link)`) has no `broken_rate_pct` and isn't wired to this — its link-rate isn't inherently good/bad the same way (many markets are structurally unlinkable outrights).
+
 ## [0.5.6] - 2026-07-01
 
 ### Fixed
