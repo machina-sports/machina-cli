@@ -23,6 +23,16 @@ The PostHog read key lives in the pod VAULT as POSTHOG_QUERY_KEY (never in code)
 injected via $TEMP_CONTEXT_VARIABLE_POSTHOG_QUERY_KEY. Read-only against PostHog; the only
 write is the optional odds heal (re-running entain-coverage-fut-refresh-markets, idempotent).
 
+Heal retry budget: entain-coverage-fut-refresh-markets is a real 15-step workflow that
+calls the live bwin API -- not free, and not something a scan stuck at degraded:odds
+should be allowed to re-trigger forever. trigger_odds_heal stops after max_heal_attempts
+(default 3) CONSECUTIVE degraded:odds scans -- read from the persisted health-doc history,
+since each scan is a fresh process with no memory of its own -- and hands off to a human
+via Slack instead ("could NOT self-heal ... needs a human") rather than continuing to
+hammer the workflow. Investigated 2026-07-01: heal_needed had never actually fired in this
+pod's history (0/39 scans), so the gap was latent, not yet a real incident -- fixed before
+it became one.
+
 Slack awareness: on every scan, a Slack message fires on a verdict TRANSITION only --
 entering a degraded state (self-healed, or "needs a human" when no heal applies/fired),
 or recovering back to ok. An unchanged ongoing state never re-notifies (the Studio/CLI
@@ -171,13 +181,54 @@ def scan_surface(request_data):
               "verdict": verdict, "heal_needed": heal, "source": "posthog"}
     return {"status": True, "data": {"health": health, "verdict": verdict, "heal_needed": heal}}
 
+def _consecutive_degraded_odds_attempts():
+    """Count how many of the MOST RECENT surface-health scans, walking back from
+    now, were consecutively 'degraded:odds' with a heal attempted. Stops at the
+    first scan that is anything else (recovery, or a different problem) -- so a
+    prior incident that already resolved never counts against a new one. This is
+    the loop's only memory across runs (each scan is a fresh process), matching
+    the pattern the rest of this file already uses for transition detection."""
+    try:
+        from core.document.controller import document_search
+        r = document_search(filters={"name": "context_graph_surface_health"}, page=1,
+                             page_size=20, sorters=["created", -1])
+        dd = r.get("data") if isinstance(r, dict) else None
+        rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+    except Exception:
+        return 0
+    n = 0
+    for row in rows or []:
+        v = row.get("value") or {}
+        if v.get("verdict") == "degraded:odds" and v.get("heal_needed"):
+            n += 1
+        else:
+            break
+    return n
+
+
 def trigger_odds_heal(request_data):
     """On degraded:odds, re-run the odds refresh (re-attach bwin odds to fixtures) for the
     configured seasons. Idempotent — same workflow the scheduler runs, just on demand.
-    Uses the pod's own X-Api-Token (from env) to call the local client-api."""
+    Uses the pod's own X-Api-Token (from env) to call the local client-api.
+
+    Capped: entain-coverage-fut-refresh-markets is a real 15-step workflow that calls
+    the live bwin API -- not free to re-run, and not something a stuck scan should be
+    allowed to hammer forever. After max_heal_attempts CONSECUTIVE degraded:odds scans
+    (default 3 -- the current scan plus the 2 that already tried and didn't fix it),
+    stop re-triggering and let notify_slack escalate to a human instead. The count is
+    read from the persisted health-doc history (see _consecutive_degraded_odds_attempts),
+    since each scan is a fresh, memory-less process."""
     p = request_data.get("params", {}) or request_data
     if not p.get("heal_needed"):
         return {"status": True, "data": {"healed": [], "heal_count": 0, "skipped": "verdict not degraded:odds"}}
+
+    max_attempts = int(p.get("max_heal_attempts", 3) or 3)
+    prior_attempts = _consecutive_degraded_odds_attempts()
+    if prior_attempts >= max_attempts:
+        return {"status": True, "data": {"healed": [], "heal_count": 0, "budget_exceeded": True,
+                                          "prior_attempts": prior_attempts, "max_attempts": max_attempts,
+                                          "skipped": "retry budget exceeded (%d consecutive attempts)" % prior_attempts}}
+
     token = os.environ.get("MACHINA_PROJECT_KEY", "")
     seasons = p.get("season_ids") or ["sr:season:101177"]
     if not isinstance(seasons, list): seasons = [seasons]
@@ -219,16 +270,24 @@ def notify_slack(request_data):
     # This task runs BEFORE save-health persists the current scan's doc, so this
     # search returns the PREVIOUS scan's verdict -- exactly what's needed to tell
     # a transition from an unchanged ongoing state.
-    prev_verdict = None
+    prev_verdict, prev_budget_exceeded = None, False
     try:
         from core.document.controller import document_search
         r = document_search(filters={"name": "context_graph_surface_health"}, page=1, page_size=1)
         dd = r.get("data") if isinstance(r, dict) else None
         rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
         if rows:
-            prev_verdict = (rows[0].get("value") or {}).get("verdict")
+            prev_v = rows[0].get("value") or {}
+            prev_verdict = prev_v.get("verdict")
+            prev_budget_exceeded = bool((prev_v.get("healed") or {}).get("budget_exceeded"))
     except Exception:
         pass
+
+    health = p.get("health") or {}
+    healed = p.get("healed") or {}
+    heal_items = healed.get("healed") if isinstance(healed, dict) else None
+    heal_ok = bool(heal_items) and not any(isinstance(h, dict) and h.get("error") for h in (heal_items or []))
+    budget_exceeded = bool(healed.get("budget_exceeded"))
 
     degraded = ("degraded:odds", "degraded:errors")
     if verdict not in degraded:
@@ -238,13 +297,18 @@ def notify_slack(request_data):
         else:
             return {"status": True, "data": {"notified": False, "skipped": "no transition"}}
     else:
-        if prev_verdict == verdict:
+        # Normally an unchanged verdict is silent -- but hitting the retry budget is
+        # itself news (auto-heal just gave up), even if the verdict string didn't
+        # move, so that transition still gets a fresh alert.
+        newly_exhausted = verdict == "degraded:odds" and budget_exceeded and not prev_budget_exceeded
+        if prev_verdict == verdict and not newly_exhausted:
             return {"status": True, "data": {"notified": False, "skipped": "unchanged degraded state"}}
-        health = p.get("health") or {}
-        healed = p.get("healed") or {}
-        heal_items = healed.get("healed") if isinstance(healed, dict) else None
-        heal_ok = bool(heal_items) and not any(isinstance(h, dict) and h.get("error") for h in (heal_items or []))
-        if verdict == "degraded:odds" and heal_ok:
+        if verdict == "degraded:odds" and budget_exceeded:
+            headline = ":rotating_light: *Context Graph -- could NOT self-heal*"
+            body = ("Odds still looked broken after %d automatic attempts -- auto-heal is "
+                     "pausing to avoid hammering the odds-refresh workflow. *Needs a human.*"
+                     % healed.get("prior_attempts", 0))
+        elif verdict == "degraded:odds" and heal_ok:
             headline = ":adhesive_bandage: *Context Graph -- self-healed*"
             body = ("Odds looked broken to users -- auto-heal re-triggered the odds refresh "
                      "automatically. Flagging for visibility, no action needed.")
@@ -292,7 +356,11 @@ def _workflow():
                        # production 2026-07-01.
                        "session_floor": "$.get('session_floor', 80)",
                        "odds_floor": "$.get('odds_floor', 0.02)",
-                       "err_ceiling": "$.get('err_ceiling', 0.08)"},
+                       "err_ceiling": "$.get('err_ceiling', 0.08)",
+                       # budget cap: stop re-triggering the (real, bwin-calling) odds-heal
+                       # workflow after this many CONSECUTIVE degraded:odds scans -- see
+                       # trigger_odds_heal's docstring.
+                       "max_heal_attempts": "$.get('max_heal_attempts', 3)"},
             "outputs": {"verdict": "$.get('sv_verdict', 'unknown')",
                         "health": "$.get('sv_health', {})", "workflow-status": "'executed'"},
             "tasks": [
@@ -311,7 +379,8 @@ def _workflow():
                  "condition": "$.get('sv_heal', False) == True",
                  "connector": {"command": "trigger_odds_heal", "name": "surface-verify-tools"},
                  "inputs": {"heal_needed": "$.get('sv_heal', False)",
-                            "season_ids": "$.get('season_ids', ['sr:season:101177'])"},
+                            "season_ids": "$.get('season_ids', ['sr:season:101177'])",
+                            "max_heal_attempts": "$.get('max_heal_attempts', 3)"},
                  "outputs": {"sv_healed": "$"}},
                 # runs before save-health so it still reads the PREVIOUS scan's
                 # verdict (for transition detection) -- see notify_slack docstring.
