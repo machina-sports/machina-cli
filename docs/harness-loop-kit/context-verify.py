@@ -34,6 +34,17 @@ already a specific, human-written summary). Silent while an already-flagged issu
 open, so it doesn't re-page every scan. Shares the same `slack-notify-config` document /
 SLACK_WEBHOOK_URL as surface-verify.py -- one webhook per pod covers both.
 
+Auto-heal for analysis<->fixture (opt-in via ANALYSIS_HEAL_WORKFLOW): when a scan finds
+collapsed analysis groups, each affected fixture gets ONE async `context-heal-runner`
+dispatch that runs this pod's per-fixture research workflow (fresh web search + LLM
+extract + doc update) -- regenerating the misattributed analyses. Async on purpose: a
+dozen sequential researches inside one connector execution is the silent-death failure
+mode scan_link hit at enterprise scale. Bounded twice: max_fixtures_per_run (default 5)
+caps cost per scan and the backlog drains across scheduled scans (verified by the next
+scan's broken count), and a no-PROGRESS budget (max_heal_attempts, default 3) stops
+re-dispatching when healing isn't working and escalates to Slack instead -- a draining
+backlog (13->10->7) never trips it; a stuck one (13->13->13) does.
+
 Provisions:
   connector context-verify-tools     scan_edges + scan_odds + scan_link
   prompt    context-verify-eval      edge-agnostic assessment (analysis, odds)
@@ -46,6 +57,7 @@ Usage:
     CLIENT_API_URL="https://<org>-<project>.org.machina.gg" \\
     API_TOKEN="<project X-Api-Token>" [MODEL="gemini-3.1-flash-lite"] \\
     [FIXTURE_DOC_NAME="sportradar-fixture"] [MARKETS_DOC_NAME="entain-markets-tier3"] \\
+    [ANALYSIS_HEAL_WORKFLOW="<per-fixture research workflow, e.g. sportingbot-coverage-fut-enrich-fixtures>"] \\
     python3 context-verify.py            # provision
     python3 context-verify.py --run      # provision, run all audits, print graph health
     python3 context-verify.py --teardown # remove
@@ -53,6 +65,8 @@ Usage:
 If this pod stores the same fixture/markets schema under a brand-prefixed doc name
 (check with a document/search sample first — same field names, different `name`),
 override FIXTURE_DOC_NAME / MARKETS_DOC_NAME instead of assuming the entain default.
+Before setting ANALYSIS_HEAL_WORKFLOW, confirm the named workflow accepts a
+`fixture_id` input (= metadata.sport_event_id) and re-researches just that fixture.
 
 Runs entirely server-side in the pod — unaffected by the MCP agent-by-name
 limitation (machina-client-api#287).
@@ -75,6 +89,14 @@ MODEL = os.environ.get("MODEL", "gemini-3.1-flash-lite")
 # per pod at provision time; the default is unchanged so existing deployments are unaffected.
 FIXTURE_DOC_NAME = os.environ.get("FIXTURE_DOC_NAME", "sportradar-fixture")
 MARKETS_DOC_NAME = os.environ.get("MARKETS_DOC_NAME", "entain-markets-tier3")
+# Auto-heal for the analysis<->fixture edge: name of THIS POD's per-fixture research
+# workflow (e.g. sportingbot-coverage-fut-enrich-fixtures on SBOT Prd -- it accepts a
+# `fixture_id` = metadata.sport_event_id input and re-researches just that fixture).
+# Default EMPTY = heal disabled, detect-only: each tenant's enrich pipeline differs, so
+# healing is strictly opt-in at provision time. When set, a `context-heal-runner` agent
+# is provisioned and the analysis audit gains a heal step (async dispatch, budgeted).
+ANALYSIS_HEAL_WORKFLOW = os.environ.get("ANALYSIS_HEAL_WORKFLOW", "").strip()
+HEAL_AGENT_NAME = "context-heal-runner"
 GENAI = {"command": "invoke_prompt", "location": "global", "model": MODEL,
          "name": "google-genai", "provider": "vertex_ai"}
 CTX_VARS = {"debugger": {"enabled": True}, "google-genai": {
@@ -113,7 +135,7 @@ def _create(kind, body):
 
 # --- connector source: deterministic edge gates (pyscript, exec'd from the DB) ---
 SCAN_SRC = r'''"""Context Graph edge scanners (analysis, odds, linkability)."""
-import json, re, unicodedata, urllib.request, urllib.error
+import json, os, re, unicodedata, urllib.request, urllib.error
 from collections import defaultdict
 
 def _docs(name, extra, limit):
@@ -225,23 +247,29 @@ def scan_edges(request_data: dict) -> dict:
     p = request_data.get("params", {}) or request_data
     try: docs = _docs("sportradar-fixture", {"value.has_pre_match_research": True}, _limit(p))
     except Exception as ex:
-        return {"status": True, "data": {"health": {"edge": "analysis<->fixture", "error": str(ex)}, "flagged": []}}
+        return {"status": True, "data": {"health": {"edge": "analysis<->fixture", "error": str(ex)}, "flagged": [], "heal_needed": False}}
     enriched = []
     for d in docs:
         v = d.get("value", {}) or {}
         tf = (v.get("pre_match_research") or {}).get("team_form") or {}
         ha = ((tf.get("home") or {}).get("analysis") or "").strip()
         title = re.sub(r"\s*\(\d+\)\s*$", "", str(v.get("title") or "")).strip()
-        if ha and title: enriched.append((title, re.sub(r"\s+", " ", ha.lower())[:160]))
-    groups = defaultdict(set)
-    for title, key in enriched: groups[key].add(title)
+        if ha and title: enriched.append((title, v.get("sport_event_id"), re.sub(r"\s+", " ", ha.lower())[:160]))
+    groups = defaultdict(set); group_ids = defaultdict(set)
+    for title, sid, key in enriched:
+        groups[key].add(title)
+        if sid: group_ids[key].add(sid)
     collapsed = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
     broken = sum(len(v) - 1 for v in collapsed.values())
-    flagged = [{"fixtures": v, "analysis": k[:120]} for k, v in list(collapsed.items())[:10]]
+    # fixture_ids feed the auto-heal: EVERY fixture in a collapsed group gets re-researched
+    # (we can't tell which one rightfully owns the analysis; re-researching the owner too is
+    # harmless -- it just gets a fresh, correct analysis of its own).
+    flagged = [{"fixtures": v, "fixture_ids": sorted(group_ids.get(k, set())), "analysis": k[:120]}
+               for k, v in list(collapsed.items())[:10]]
     n = len(enriched)
     health = {"edge": "analysis<->fixture", "sampled": n, "collapsed_groups": len(collapsed),
               "broken_edges": broken, "broken_rate_pct": round(100 * broken / n) if n else 0}
-    return {"status": True, "data": {"health": health, "flagged": flagged}}
+    return {"status": True, "data": {"health": health, "flagged": flagged, "heal_needed": broken > 0}}
 
 def scan_odds(request_data: dict) -> dict:
     """odd <-> market <-> fixture: a market's options must reference the fixture it declares."""
@@ -358,6 +386,92 @@ def resolve_link_ids(request_data: dict) -> dict:
     return {"status": True, "data": {"links": links, "resolved": len(links),
             "deterministic": det_n, "semantic": len(links) - det_n, "rejected": rejected}}
 
+def _stuck_heal_attempts(current_broken):
+    """How many CONSECUTIVE prior analysis<->fixture scans attempted a heal WITHOUT the
+    broken count improving, walking back from now. Progress resets the chain: a backlog
+    draining 13 -> 10 -> 7 across scans never trips the budget (each attempt helped);
+    13 -> 13 -> 13 does (healing isn't working -- stop dispatching and call a human).
+    Read from the persisted health-doc history: each scan is a fresh process, so the
+    doc trail is the loop's only memory -- same pattern the transition detection uses."""
+    try:
+        from core.document.controller import document_search
+        r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=30,
+                             sorters=["created", -1])
+        dd = r.get("data") if isinstance(r, dict) else None
+        rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+    except Exception:
+        return 0
+    n, cur = 0, current_broken
+    for row in rows or []:
+        v = row.get("value") or {}
+        h = v.get("health") or {}
+        if h.get("edge") != "analysis<->fixture":
+            continue
+        broken = h.get("broken_edges") or 0
+        attempted = ((v.get("healed") or {}).get("heal_count") or 0) > 0
+        if broken > 0 and attempted and cur >= broken:
+            n += 1; cur = broken
+        else:
+            break
+    return n
+
+
+def trigger_analysis_heal(request_data: dict) -> dict:
+    """Re-research the fixtures in collapsed analysis groups, via async agent dispatches.
+
+    Each affected fixture gets one `context-heal-runner` dispatch (delay=True), which runs
+    this pod's per-fixture research workflow (fresh web search + LLM extract + doc update)
+    server-side on its own -- the connector only fires the dispatches and returns in ms.
+    Deliberately NOT synchronous: each research takes ~a minute, and a dozen sequential
+    ones inside one connector execution is exactly the silent-death-mid-run failure mode
+    scan_link hit at enterprise scale.
+
+    Bounded twice: max_fixtures_per_run caps cost per scan (the backlog drains across
+    scheduled scans, verified by the next scan's broken count), and _stuck_heal_attempts
+    stops re-dispatching after max_heal_attempts consecutive no-progress rounds and lets
+    notify_slack escalate to a human instead."""
+    p = request_data.get("params", {}) or request_data
+    if not p.get("heal_needed"):
+        return {"status": True, "data": {"healed": [], "heal_count": 0, "skipped": "edge is clean"}}
+    heal_agent = (p.get("heal_agent") or "").strip()
+    if not heal_agent or heal_agent.startswith("$"):
+        return {"status": True, "data": {"healed": [], "heal_count": 0, "skipped": "heal not configured"}}
+
+    health = p.get("health") or {}
+    current_broken = health.get("broken_edges") or 0
+    max_attempts = int(p.get("max_heal_attempts", 3) or 3)
+    stuck = _stuck_heal_attempts(current_broken)
+    if stuck >= max_attempts:
+        return {"status": True, "data": {"healed": [], "heal_count": 0, "budget_exceeded": True,
+                                          "prior_attempts": stuck, "max_attempts": max_attempts,
+                                          "skipped": "no progress after %d heal rounds" % stuck}}
+
+    # unique fixture ids across flagged groups, order-preserving
+    ids, seen = [], set()
+    for g in (p.get("flagged") or []):
+        for fid in (g.get("fixture_ids") or []) if isinstance(g, dict) else []:
+            if fid and fid not in seen:
+                seen.add(fid); ids.append(fid)
+    cap = int(p.get("max_fixtures_per_run", 5) or 5)
+    batch, backlog = ids[:cap], max(0, len(ids) - cap)
+
+    token = os.environ.get("MACHINA_PROJECT_KEY", "")
+    out = []
+    for fid in batch:
+        try:
+            req = urllib.request.Request("http://localhost:5003/agent/executor/" + heal_agent,
+                data=json.dumps({"context-agent": {"fixture_id": fid},
+                                 "agent-config": {"delay": True}}).encode(), method="POST",
+                headers={"X-Api-Token": token, "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                r.read()
+            out.append({"fixture_id": fid, "status": "dispatched"})
+        except Exception as e:
+            out.append({"fixture_id": fid, "error": str(e)[:120]})
+    return {"status": True, "data": {"healed": out, "heal_count": len([o for o in out if not o.get("error")]),
+                                      "backlog": backlog}}
+
+
 # Raw broken-COUNT field per edge, not the rounded broken_rate_pct: round(100*1/500) is
 # 0, so a genuine single broken record can silently round down to a "clean" 0% and never
 # alert. The count is exact; the percentage is just for display.
@@ -403,7 +517,7 @@ def notify_slack(request_data: dict) -> dict:
     # name then walk client-side to the first (most recent) match for THIS edge. This
     # task runs before save-health persists the current run, so the first match found
     # here is genuinely the prior reading -- same trick surface-verify uses.
-    prev_count, prev_rate = None, None
+    prev_count, prev_budget_exceeded = None, False
     try:
         from core.document.controller import document_search
         r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=20,
@@ -411,24 +525,42 @@ def notify_slack(request_data: dict) -> dict:
         dd = r.get("data") if isinstance(r, dict) else None
         rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
         for row in rows or []:
-            rv = (row.get("value") or {}).get("health") or {}
-            if rv.get("edge") == edge:
-                prev_count = rv.get(count_field)
-                prev_rate = rv.get("broken_rate_pct")
+            rv = row.get("value") or {}
+            if (rv.get("health") or {}).get("edge") == edge:
+                prev_count = (rv.get("health") or {}).get(count_field)
+                prev_budget_exceeded = bool((rv.get("healed") or {}).get("budget_exceeded"))
                 break
     except Exception:
         pass
 
+    healed = p.get("healed") or {}
+    heal_count = healed.get("heal_count") or 0
+    budget_exceeded = bool(healed.get("budget_exceeded"))
+
     was_broken = bool(prev_count and prev_count > 0)
     is_broken = count > 0
-    if is_broken == was_broken:
+    # Hitting the heal budget is news even when the broken count itself didn't move --
+    # auto-heal just gave up, which is exactly when a human must take over.
+    newly_exhausted = is_broken and budget_exceeded and not prev_budget_exceeded
+    if is_broken == was_broken and not newly_exhausted:
         return {"status": True, "data": {"notified": False, "skipped": "unchanged"}}
 
     assessment = (p.get("assessment") or "").strip()
-    if is_broken:
+    if is_broken and budget_exceeded:
+        headline = ":rotating_light: *Context Graph -- could NOT self-heal* (`%s`)" % edge
+        body = ("Still %s broken after %s heal rounds with no progress -- auto-heal is pausing. "
+                 "*Needs a human.*" % (count, healed.get("prior_attempts", "?")))
+        if assessment: body += "\n>%s" % assessment
+    elif is_broken and heal_count > 0:
+        backlog = healed.get("backlog") or 0
+        tail = " (%d more queued for the next scans)" % backlog if backlog else ""
+        headline = ":adhesive_bandage: *Context Graph -- data issue found, self-healing* (`%s`)" % edge
+        body = ((assessment + "\n>") if assessment else "") + \
+               ("Auto-heal dispatched fresh research for %d fixture(s)%s -- the next scans verify the fix." % (heal_count, tail))
+    elif is_broken:
         headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
         body = assessment or ("%s broken (%s%% of sample). *Needs a human* -- "
-                               "this edge has no auto-fix." % (count, rate))
+                               "auto-heal is not configured for this edge here." % (count, rate))
     else:
         headline = ":white_check_mark: *Context Graph -- recovered* (`%s`)" % edge
         body = "Back to 0 broken (was %s)." % prev_count
@@ -479,6 +611,9 @@ LINK_INSTR = (
 # --- workflow fragments ---
 HVAL = ("{'edge':$.get('cg_health', {}).get('edge','?'),'health':$.get('cg_health', {}),"
         "'flagged':$.get('cg_flagged', []),'assessment':$.get('cg_summary', {}).get('assessment',''),"
+        # heal attempts ride the history doc: the stuck-heal budget and the timeline both
+        # reconstruct from this trail (each scan is a fresh process with no other memory).
+        "'healed':$.get('cg_healed', {}),"
         "'generator':'context-verify v0'}")
 LINKVAL = ("{'edge':'market->fixture(link)','health':$.get('cg_health', {}),"
            "'recovered_by_semantic':len($.get('cg_link', {}).get('matches', [])),"
@@ -496,31 +631,50 @@ HEALVAL = ("{'edge':'market->fixture','links':$.get('cg_links', []),"
            "'source':'deterministic+semantic','generator':'context-heal v2 (country-map + full universe)'}")
 
 
-def _audit_workflow(name, title, desc, scan_command):
+def _audit_workflow(name, title, desc, scan_command, with_heal=False):
+    tasks = [
+        {"name": "scan", "type": "connector", "connector": {"command": scan_command, "name": "context-verify-tools"},
+         "inputs": {"limit": "$.get('limit', 200)"},
+         "outputs": {"cg_health": "$.get('health')", "cg_flagged": "$.get('flagged')",
+                     "cg_heal": "$.get('heal_needed', False)"}},
+        {"name": "context-verify-eval", "type": "prompt", "connector": GENAI,
+         "inputs": {"_1-health": "$.get('cg_health', {})", "_2-flagged": "$.get('cg_flagged', [])"},
+         "outputs": {"cg_summary": "$"}},
+    ]
+    if with_heal:
+        # async re-research dispatches for the collapsed fixtures; the workflow name it
+        # runs is tenant-specific, baked in at provision time via ANALYSIS_HEAL_WORKFLOW.
+        tasks.append(
+            {"name": "heal", "type": "connector",
+             "condition": "$.get('cg_heal', False) == True",
+             "connector": {"command": "trigger_analysis_heal", "name": "context-verify-tools"},
+             "inputs": {"heal_needed": "$.get('cg_heal', False)",
+                        "health": "$.get('cg_health', {})",
+                        "flagged": "$.get('cg_flagged', [])",
+                        "heal_agent": "'%s'" % HEAL_AGENT_NAME,
+                        "max_heal_attempts": "$.get('max_heal_attempts', 3)",
+                        "max_fixtures_per_run": "$.get('max_fixtures_per_run', 5)"},
+             "outputs": {"cg_healed": "$"}})
+    tasks += [
+        # runs before save-health so it still reads the PREVIOUS reading for this
+        # edge (transition detection) -- see notify_slack's docstring. Always runs
+        # (no condition): it also fires the "recovered" message.
+        {"name": "notify", "type": "connector",
+         "connector": {"command": "notify_slack", "name": "context-verify-tools"},
+         "inputs": {"health": "$.get('cg_health', {})",
+                    "assessment": "$.get('cg_summary', {}).get('assessment','')",
+                    "healed": "$.get('cg_healed', {})",
+                    "webhook_url": "$TEMP_CONTEXT_VARIABLE_SLACK_WEBHOOK_URL"},
+         "outputs": {"cg_notified": "$"}},
+        {"name": "save-health", "type": "document",
+         "config": {"action": "save", "embed-vector": False, "force-update": True},
+         "documents": {"context_graph_health": HVAL}},
+    ]
     return {"name": name, "title": title, "status": "active", "description": desc,
             "context-variables": CTX_VARS, "inputs": {"limit": "$.get('limit', 200)"},
             "outputs": {"health": "$.get('cg_health', {})",
                         "assessment": "$.get('cg_summary', {}).get('assessment','')", "workflow-status": "'executed'"},
-            "tasks": [
-                {"name": "scan", "type": "connector", "connector": {"command": scan_command, "name": "context-verify-tools"},
-                 "inputs": {"limit": "$.get('limit', 200)"},
-                 "outputs": {"cg_health": "$.get('health')", "cg_flagged": "$.get('flagged')"}},
-                {"name": "context-verify-eval", "type": "prompt", "connector": GENAI,
-                 "inputs": {"_1-health": "$.get('cg_health', {})", "_2-flagged": "$.get('cg_flagged', [])"},
-                 "outputs": {"cg_summary": "$"}},
-                # runs before save-health so it still reads the PREVIOUS reading for this
-                # edge (transition detection) -- see notify_slack's docstring. Always runs
-                # (no condition): it also fires the "recovered" message.
-                {"name": "notify", "type": "connector",
-                 "connector": {"command": "notify_slack", "name": "context-verify-tools"},
-                 "inputs": {"health": "$.get('cg_health', {})",
-                            "assessment": "$.get('cg_summary', {}).get('assessment','')",
-                            "webhook_url": "$TEMP_CONTEXT_VARIABLE_SLACK_WEBHOOK_URL"},
-                 "outputs": {"cg_notified": "$"}},
-                {"name": "save-health", "type": "document",
-                 "config": {"action": "save", "embed-vector": False, "force-update": True},
-                 "documents": {"context_graph_health": HVAL}},
-            ]}
+            "tasks": tasks}
 
 
 def _link_workflow():
@@ -572,14 +726,16 @@ def definitions():
              "filename": "context_verify.py", "filetype": "pyscript", "filecontent": _scan_src_for_tenant(),
              "commands": [{"name": "Scan", "value": "scan_edges"}, {"name": "ScanOdds", "value": "scan_odds"},
                           {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"},
-                          {"name": "NotifySlack", "value": "notify_slack"}]}
+                          {"name": "NotifySlack", "value": "notify_slack"},
+                          {"name": "TriggerAnalysisHeal", "value": "trigger_analysis_heal"}]}
     evaluate = {"name": "context-verify-eval", "title": "Context Verify Eval", "type": "prompt", "status": "active",
                 "description": "edge-agnostic semantic lens over graph-health findings",
                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
     link_eval = {"name": "context-link-eval", "title": "Context Link Eval", "type": "prompt", "status": "active",
                  "description": "semantic resolver for the market->fixture linkability edge",
                  "instruction": LINK_INSTR, "schema": LINK_SCHEMA}
-    wf_a = _audit_workflow("context-verify", "Context Verify", "audit the analysis<->fixture edge", "scan_edges")
+    wf_a = _audit_workflow("context-verify", "Context Verify", "audit the analysis<->fixture edge", "scan_edges",
+                            with_heal=bool(ANALYSIS_HEAL_WORKFLOW))
     wf_o = _audit_workflow("context-verify-odds", "Context Verify Odds", "audit the odd<->market<->fixture edge", "scan_odds")
     wf_l = _link_workflow()
     edge_workflows = [
@@ -596,8 +752,23 @@ def definitions():
             "description": "continuous self-healing sweep of the context graph (set status:active to enable)",
             "context": {"config-frequency": 60}, "context-agent": {"limit": "$.get('limit', 200)"},
             "workflows": edge_workflows}
-    return [("connector", tools), ("prompt", evaluate), ("prompt", link_eval),
+    defs = [("connector", tools), ("prompt", evaluate), ("prompt", link_eval),
             ("workflow", wf_a), ("workflow", wf_o), ("workflow", wf_l), ("agent", runner), ("agent", beat)]
+    if ANALYSIS_HEAL_WORKFLOW:
+        # One async dispatch per fixture to heal: trigger_analysis_heal fires
+        # agent/executor/<this> with {"fixture_id": ...} and the pod's own per-fixture
+        # research workflow does the actual work server-side (fresh search + LLM +
+        # doc update). Inactive/unscheduled -- executor-dispatched only.
+        heal_runner = {"name": HEAL_AGENT_NAME, "title": "Context Heal Runner", "status": "inactive",
+                       "scheduled": False,
+                       "description": "re-researches one fixture (dispatched by the analysis<->fixture heal)",
+                       "context-agent": {"fixture_id": "$.get('fixture_id')"},
+                       "workflows": [{"name": ANALYSIS_HEAL_WORKFLOW,
+                                      "description": "per-fixture research regeneration",
+                                      "inputs": {"fixture_id": "$.get('fixture_id')"},
+                                      "outputs": {"workflow-status": "$.get('workflow-status', 'executed')"}}]}
+        defs.append(("agent", heal_runner))
+    return defs
 
 
 def _run_once():

@@ -8,6 +8,8 @@ each project's context_graph_* docs + its self-heal agents (no extra state).
 import contextlib
 import io
 import json as json_lib
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import typer
@@ -169,3 +171,176 @@ def status(
     console.print(table)
     if skipped:
         console.print(f"[dim]{skipped} project(s) skipped (unreachable / no access).[/]")
+
+
+# ---------------------------------------------------------------------------
+# timeline — the self-healing event history, reconstructed from the doc trail
+# ---------------------------------------------------------------------------
+
+# Raw broken-count field per data edge (the exact signal; broken_rate_pct rounds
+# 1/500 down to 0). Mirrors BROKEN_COUNT_FIELD in the harness-loop kit.
+_DATA_EDGE_COUNT = {"analysis<->fixture": "broken_edges", "odd<->market<->fixture": "misattributed"}
+_DEGRADED = ("degraded:odds", "degraded:errors")
+
+
+def _parse_created(doc: dict):
+    try:
+        return parsedate_to_datetime(doc.get("created"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _events_from_history(health_docs: list, surface_docs: list) -> list:
+    """Reconstruct self-healing events from the persisted graph-health trail.
+
+    Every scan appends a doc, so consecutive docs per edge encode the story:
+    a 0->N broken step is a detection, healed.heal_count>0 is a heal round,
+    healed.budget_exceeded is auto-heal pausing, N->0 is a recovery. Works
+    retroactively on any pod that has history — no new writes needed.
+    """
+    events = []
+
+    # data edges (analysis<->fixture, odd<->market<->fixture)
+    per_edge: dict = {}
+    for doc in health_docs:
+        v = doc.get("value") or {}
+        h = v.get("health") or {}
+        edge = h.get("edge")
+        if edge not in _DATA_EDGE_COUNT:
+            continue
+        ts = _parse_created(doc)
+        if ts is None:
+            continue
+        per_edge.setdefault(edge, []).append((ts, h.get(_DATA_EDGE_COUNT[edge]) or 0, v.get("healed") or {}))
+    for edge, rows in per_edge.items():
+        rows.sort(key=lambda r: r[0])
+        prev_broken = 0
+        for ts, broken, healed in rows:
+            if broken > 0 and prev_broken == 0:
+                events.append({"ts": ts, "edge": edge, "event": "detected", "detail": f"{broken} broken"})
+            if (healed.get("heal_count") or 0) > 0:
+                backlog = healed.get("backlog") or 0
+                extra = f" (+{backlog} queued)" if backlog else ""
+                events.append({"ts": ts, "edge": edge, "event": "heal",
+                               "detail": f"re-research dispatched for {healed['heal_count']} fixture(s){extra}"})
+            if healed.get("budget_exceeded"):
+                events.append({"ts": ts, "edge": edge, "event": "heal-paused",
+                               "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human"})
+            if broken == 0 and prev_broken > 0:
+                events.append({"ts": ts, "edge": edge, "event": "recovered",
+                               "detail": f"back to 0 broken (was {prev_broken})"})
+            prev_broken = broken
+
+    # live surface (surface<->users)
+    srows = []
+    for doc in surface_docs:
+        v = doc.get("value") or {}
+        ts = _parse_created(doc)
+        if ts is None:
+            continue
+        srows.append((ts, v.get("verdict") or "?", v.get("healed") or {}))
+    srows.sort(key=lambda r: r[0])
+    prev_v = None
+    for ts, verdict, healed in srows:
+        if verdict in _DEGRADED and verdict != prev_v:
+            events.append({"ts": ts, "edge": "surface<->users", "event": "detected", "detail": verdict})
+        heal_items = healed.get("healed") if isinstance(healed, dict) else None
+        if heal_items:
+            events.append({"ts": ts, "edge": "surface<->users", "event": "heal",
+                           "detail": f"odds refresh re-triggered ({len(heal_items)} season(s))"})
+        if isinstance(healed, dict) and healed.get("budget_exceeded"):
+            events.append({"ts": ts, "edge": "surface<->users", "event": "heal-paused",
+                           "detail": "retry budget exceeded — needs a human"})
+        if verdict not in _DEGRADED and prev_v in _DEGRADED:
+            events.append({"ts": ts, "edge": "surface<->users", "event": "recovered",
+                           "detail": f"back to {verdict} (was {prev_v})"})
+        prev_v = verdict
+
+    events.sort(key=lambda e: e["ts"])
+    return events
+
+
+def _collect_timeline(project_id: str) -> list:
+    """Events for one project, from its persisted history (read-only)."""
+    client = ProjectClient(project_id)
+    health = _docs(client, "context_graph_health", 300)
+    surface = _docs(client, "context_graph_surface_health", 300)
+    return _events_from_history(health, surface)
+
+
+_EVENT_STYLE = {"detected": "red", "heal": "cyan", "heal-paused": "bold red", "recovered": "green"}
+
+
+@app.command("timeline")
+def timeline(
+    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    org: bool = typer.Option(False, "--org", help="Merge events across all projects in the org"),
+    days: int = typer.Option(30, "--days", "-d", help="How far back to look"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """The self-healing event history: detected → healed → paused/recovered, per edge."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = []  # (project_name, event)
+    skipped = 0
+    if org:
+        core = MachinaClient()
+        res = core.post("user/projects/search", {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]})
+        for p in res.get("data", []) or []:
+            pid = p.get("project_id") or p.get("id")
+            pname = p.get("project_name") or p.get("name") or pid
+            if not pid:
+                continue
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    for ev in _collect_timeline(pid):
+                        rows.append((pname, ev))
+            except (SystemExit, Exception):  # noqa: BLE001
+                skipped += 1
+    else:
+        pid = project_id or get_config("default_project_id")
+        if not pid:
+            console.print("[red]No project selected. Run `machina project use <id>` or pass --project.[/red]")
+            raise typer.Exit(1)
+        pname = get_config("default_project_name") or pid
+        for ev in _collect_timeline(pid):
+            rows.append((pname, ev))
+
+    rows = [(n, e) for n, e in rows if e["ts"] >= cutoff]
+    rows.sort(key=lambda r: r[1]["ts"])
+    counts = {"detected": 0, "heal": 0, "heal-paused": 0, "recovered": 0}
+    for _, e in rows:
+        counts[e["event"]] = counts.get(e["event"], 0) + 1
+
+    if json_output:
+        payload = {
+            "events": [{"project": n, "ts": e["ts"].isoformat(), "edge": e["edge"],
+                        "event": e["event"], "detail": e["detail"]} for n, e in rows],
+            "summary": counts, "window_days": days, "skipped": skipped,
+        }
+        console.print_json(json_lib.dumps(payload))
+        return
+
+    if not rows:
+        console.print(f"[yellow]No self-healing events in the last {days} day(s).[/yellow]")
+        return
+    table = Table(title=f"Self-healing timeline — last {days} day(s)")
+    table.add_column("Time (UTC)", style="dim", no_wrap=True)
+    if org:
+        table.add_column("Project", style="bold")
+    table.add_column("Edge")
+    table.add_column("Event")
+    table.add_column("Detail", overflow="fold")
+    for pname, e in rows:
+        style = _EVENT_STYLE.get(e["event"], "")
+        cells = [e["ts"].strftime("%b %d %H:%M")]
+        if org:
+            cells.append(pname)
+        cells += [e["edge"], f"[{style}]{e['event']}[/]" if style else e["event"], e["detail"]]
+        table.add_row(*cells)
+    console.print(table)
+    console.print(
+        f"  [dim]{counts['detected']} detected · {counts['heal']} heal round(s) · "
+        f"{counts['recovered']} recovered · {counts['heal-paused']} escalated to a human[/]"
+        + (f" [dim]· {skipped} project(s) skipped[/]" if skipped else "")
+    )

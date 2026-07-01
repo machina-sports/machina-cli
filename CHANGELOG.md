@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.6.0] - 2026-07-01
+
+### Added
+- **Auto-heal for the `analysis<->fixture` edge** (opt-in via `ANALYSIS_HEAL_WORKFLOW` at provision time). When `context-verify` finds fixtures sharing an identical pre-match analysis (the misattribution class), each affected fixture now gets one **async** `context-heal-runner` dispatch that runs the pod's own per-fixture research workflow (fresh web search + LLM extract + doc update) — regenerating the misattributed analyses instead of just flagging them. Async by design: a dozen sequential researches inside one connector execution is the silent-death failure mode `scan_link` hit at enterprise scale. Bounded twice: `max_fixtures_per_run` (default 5) caps cost per scan with the backlog draining across scheduled scans, and a **no-progress budget** (`max_heal_attempts`, default 3) stops re-dispatching when healing isn't working — a draining backlog (13→10→7) never trips it; a stuck one (13→13→13) escalates to Slack ("could NOT self-heal") instead. Slack messages now distinguish *found + self-healing* from *found, needs a human*.
+- **`machina context-graph timeline [--org] [--days N]`** — the self-healing event history: every `detected` → `heal` → `heal-paused`/`recovered` event, reconstructed from the persisted graph-health trail (works retroactively on any pod with history; no new state). The summary line is the ROI number: how many times the loop found and fixed a problem before a human had to. `--org` merges all projects into one chronological stream.
+
 ## [0.5.8] - 2026-07-01
 
 ### Fixed
