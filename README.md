@@ -114,13 +114,16 @@ machina org create <name>              # Create organization
 machina org use <org-id>               # Set default organization
 machina org usage                      # Token consumption (last 30d), by project/agent/day
 machina org usage --days 7             # Narrow the window
-machina org usage --project <id>       # Scope to one project (faster)
+machina org usage --project <id>       # Scope to one project
 machina org usage --json               # Output as JSON
 ```
 
-`org usage` rolls up LLM token consumption from agent executions (`execution_tokens`)
-across the organization's projects — broken down by project, agent, and day, with the
-prompt/completion split. Useful for cost/capacity tracking.
+`org usage` reports LLM token consumption from the permanent usage ledger
+(`organization_ledger`) via core-api — the same source the Studio usage view uses, so
+the total covers the full window and matches Studio. Broken down by project, agent, and
+day, with the input/output split. The by-project / by-agent breakdown is best-effort and
+may be omitted on a very large org (the headline total and by-day stay exact). Useful for
+cost/capacity tracking.
 
 ### Projects
 

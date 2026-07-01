@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -250,10 +251,22 @@ def usage(
     has_unnamed = False
 
     with status_cm:
-        # 1) Authoritative headline + by-day: cheap paginated call. `totals` and
-        #    `chart_data` are computed server-side over the FULL window regardless of
-        #    page_size, so page_size=1 keeps the response tiny.
-        res = client.post(f"{scope}/{scope_id}/usage", {**window_body, "page": 1, "page_size": 1})
+        # 1) Authoritative headline + by-day. `totals` and `chart_data` are computed
+        #    server-side over the FULL window; page_size=1 only shrinks the HTTP
+        #    response (the server still scans the whole window), so on a very large
+        #    org this call can be slow — surface a timeout as an actionable message
+        #    rather than an unhandled traceback.
+        try:
+            res = client.post(
+                f"{scope}/{scope_id}/usage", {**window_body, "page": 1, "page_size": 1}
+            )
+        except httpx.HTTPError:
+            console.print(
+                f"[red]Usage query for this {scope} timed out or failed. "
+                f"Try a narrower window with --days.[/red]"
+            )
+            raise typer.Exit(1)
+
         data = (res or {}).get("data", {}) or {}
         totals = data.get("totals", {}) or {}
         grand_prompt = int(totals.get("input", 0) or 0)
@@ -270,15 +283,20 @@ def usage(
 
         # 2) Best-effort by-project / by-agent from the (unpaginated) export. If it
         #    fails/times out on a large org, the headline + by-day above stay exact.
-        pid_names = {} if project_id else _resolve_org_projects(org_id)
+        #    The org and project export endpoints project token fields under DIFFERENT
+        #    keys (org: input/output/pid; project: input_tokens/output_tokens/
+        #    project_id), so read both shapes. Resolving project names is part of the
+        #    same best-effort block: a failure there degrades the breakdown, it must
+        #    not abort the already-computed headline.
         try:
+            pid_names = {} if project_id else _resolve_org_projects(org_id)
             exp = client.post(f"{scope}/{scope_id}/usage/export", window_body, quiet=True)
             documents = ((exp or {}).get("data", {}) or {}).get("documents", []) or []
             for doc in documents:
-                p = int(doc.get("input") or 0)
-                c = int(doc.get("output") or 0)
+                p = int(doc.get("input", doc.get("input_tokens", 0)) or 0)
+                c = int(doc.get("output", doc.get("output_tokens", 0)) or 0)
                 t = p + c
-                raw_pid = doc.get("pid") or ""
+                raw_pid = doc.get("pid") or doc.get("project_id") or ""
                 proj_label = pid_names.get(raw_pid, raw_pid or "(no project)")
                 agent_label = doc.get("name") or "(unnamed)"
                 if not doc.get("name"):
@@ -289,7 +307,7 @@ def usage(
                     b["completion"] += c
                     b["total"] += t
                     b["count"] += 1
-        except (SystemExit, Exception):  # noqa: BLE001 — breakdown is best-effort only
+        except (SystemExit, httpx.HTTPError):
             breakdown_available = False
 
     grand = {
