@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.8] - 2026-07-01
+
+### Fixed
+- **`context-verify`'s new Slack notify (0.5.7) used the rounded `broken_rate_pct` as its broken/clean signal — `round(100 * 1/500)` is `0`, so a single genuine broken record could round down to a "clean" 0% and never alert.** Found immediately while deploying 0.5.7 to SBOT Prd, on the exact real record it should have caught. Switched to the raw broken-count field per edge (`broken_edges` for `analysis<->fixture`, `misattributed` for `odd<->market<->fixture`) — exact, never rounds away a real finding. The percentage is still shown in messages, just no longer used as the decision signal.
+
 ## [0.5.7] - 2026-07-01
 
 ### Added
