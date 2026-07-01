@@ -31,7 +31,7 @@ pipx install machina-cli
 ## Verify
 
 ```bash
-machina version          # -> machina-cli 0.4.8
+machina version          # -> prints the installed version, e.g. machina-cli 0.4.9
 ```
 
 ## Update
