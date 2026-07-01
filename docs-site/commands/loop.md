@@ -75,6 +75,31 @@ machina loop run "Quais os próximos 2 jogos? Liste com horário." --watch
 #   ✓ verified (evaluator: gemini-3.1-flash-lite)
 ```
 
+## Tools the loop can call
+
+The reasoning step (`loop-reasoning`) picks from a catalog and emits `tool_calls`; the `loop-tools` connector dispatches them **in-pod**. Out of the box:
+
+| Tool | What it does |
+|------|--------------|
+| `calculate` | Evaluate arithmetic (the model never computes it itself). |
+| `get_datetime` | Current UTC date/time. |
+| `echo` | Echo text back. |
+| `find_fixtures` | Upcoming fixtures + AI pre-match analysis from the project's `sportradar-fixture` docs. |
+| `read_documents` | Read recent documents on the project pod by name (copilot threads, harness sessions, fixtures, config) — via the same in-pod `document_search` the MCP uses. |
+| `fetch_conversations` | Recent **real end-user chat transcripts** from PostHog (user context + bot answer + category) — for analyzing conversation quality and suggesting bot improvements. |
+
+So a turn can reason over real project data or live conversations, not just do math:
+
+```bash
+machina loop run "Analise as conversas recentes e sugira melhorias no bot" --watch
+#   turn 1 assistant  → fetch_conversations({"limit": 5})
+#   turn 1 tool       ← [{"category":"faq_bonus","user_ctx":"…","bot":"…"}, …]
+#   turn 1 assistant  Sugestões: 1. Respostas truncadas … 2. Promoções sem link direto …
+#   ✓ verified (evaluator: gemini-3.1-flash-lite)
+```
+
+Add a tool by extending the `loop-tools` dispatcher **and** the `loop-reasoning` catalog in `provision.py`, then re-provision.
+
 ## `watch` / `say` / `stop` / `sessions`
 
 ```bash

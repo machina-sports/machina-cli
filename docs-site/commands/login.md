@@ -26,6 +26,7 @@ machina auth logout                    # clear stored credentials
 - Browser login opens your browser for Clerk SSO / magic-link sign-in, then stores the session in `~/.machina/credentials.json` (`600`).
 - After a successful login the CLI opens the [interactive REPL](/guide/repl). Pass `--no-interactive` to skip it — useful in scripts.
 - For CI, prefer `--api-key` or the `MACHINA_API_KEY` environment variable.
+- `--api-key` stores the key and **keeps it even if the server can't confirm it** — some account auth endpoints only accept a *session* token, so verification can be inconclusive; the key is never silently discarded. Use an **account-level** API key here. A *project-scoped* key won't authenticate the account login — use it via `MACHINA_API_KEY` for project commands, or [`connect --mint`](/commands/connect) to wire an external agent.
 
 ::: tip
 In CI, set `MACHINA_API_KEY` instead of calling `machina login` — every command picks the key up automatically with no interactive step.

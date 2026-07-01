@@ -5,7 +5,7 @@ Run `machina` with no arguments to open an interactive session (REPL):
 ```text
 $ machina
 
-  ✦ Machina CLI v0.2.x
+  ✦ Machina CLI v0.4.8
   Organization: Acme Corp
   Project:      demo-project
 

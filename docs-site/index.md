@@ -33,6 +33,9 @@ features:
   - icon: 🔁
     title: Durable agentic loop
     details: Run a verified, resumable agentic loop server-side — `machina loop run "…" --watch`. Every turn is persisted and independently checked (gate + evaluator) before it finalizes.
+  - icon: 🕸️
+    title: Self-healing Context Graph
+    details: Verified, self-healing edges over your data — entity resolution, data health, and the live surface (odds & errors). Inspect it per project or across the whole org with `machina context-graph status`.
   - icon: ⚽
     title: Sports data
     details: The full sports-skills CLI mounted under `machina sports` — football, F1, NBA, markets and more, delegated live.
@@ -62,8 +65,8 @@ machina workflow list
 
 | Group | Commands |
 | --- | --- |
-| **Platform** | `login` · `org` · `project` · `credentials` |
+| **Platform** | `login` · `org` · `project` · `credentials` · `connect` · `mcp` |
 | **Resources** | `workflow` · `agent` · `connector` · `mapping` · `prompt` · `document` |
-| **Operations** | `execution` · `skills` · `factory` · `loop` · `sports` · `template` · `deploy` · `config` · `update` |
+| **Operations** | `execution` · `skills` · `factory` · `loop` · `context-graph` · `sports` · `template` · `deploy` · `config` · `update` |
 
 New here? Start with [Installation](/guide/installation), then the [Quickstart](/guide/quickstart).

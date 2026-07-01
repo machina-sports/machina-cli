@@ -59,6 +59,8 @@ export default defineConfig({
             { text: "org", link: "/commands/org" },
             { text: "project", link: "/commands/project" },
             { text: "credentials", link: "/commands/credentials" },
+            { text: "connect", link: "/commands/connect" },
+            { text: "mcp", link: "/commands/mcp" },
           ],
         },
         {
@@ -79,6 +81,7 @@ export default defineConfig({
             { text: "skills", link: "/commands/skills" },
             { text: "factory", link: "/commands/factory" },
             { text: "loop", link: "/commands/loop" },
+            { text: "context-graph", link: "/commands/context-graph" },
             { text: "sports", link: "/commands/sports" },
             { text: "template", link: "/commands/template" },
             { text: "deploy", link: "/commands/deploy" },
