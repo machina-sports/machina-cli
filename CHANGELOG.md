@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.5] - 2026-07-01
+
+### Added
+- **`context-verify` supports per-tenant document names** (`FIXTURE_DOC_NAME` / `MARKETS_DOC_NAME`, default `sportradar-fixture` / `entain-markets-tier3` — unchanged, so existing deployments are unaffected). Needed to provision it on SBOT Prd (sportingbot.com): same underlying fixture/markets schema (`bwin_fixture_id`, `markets_tier3`, `pre_match_research`, ...), verified field-identical, but stored under `sportingbot-fixture` / `sportingbot-markets-tier3` instead of the entain-branded names — running unmodified would have silently audited zero documents.
+
 ## [0.5.4] - 2026-07-01
 
 ### Fixed
