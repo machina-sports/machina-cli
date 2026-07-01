@@ -37,6 +37,12 @@ Usage (run from inside the enrichment pod, like context-verify.py):
     python3 surface-verify.py            # provision (+ upsert the Slack config if set)
     python3 surface-verify.py --run      # provision + run one surface check
     python3 surface-verify.py --teardown # remove
+
+To prove the Slack notify fires for real (not just the local dry-run harness),
+force a transition with the workflow's threshold overrides -- degraded:errors
+never triggers the odds heal, so this is side-effect-free:
+    POST workflow/execute/surface-verify {"window_hours": 6, "err_ceiling": 0.001}   # -> degraded:errors, alerts
+    POST workflow/execute/surface-verify {"window_hours": 6}                         # -> back to ok, alerts "recovered"
 """
 
 import json
@@ -276,7 +282,17 @@ def _workflow():
             "description": "live-surface defense: PostHog signal -> verdict -> odds heal",
             "context-variables": {"debugger": {"enabled": True}},
             "inputs": {"window_hours": "$.get('window_hours', 6)",
-                       "season_ids": "$.get('season_ids', ['sr:season:101177'])"},
+                       "season_ids": "$.get('season_ids', ['sr:season:101177'])",
+                       # threshold overrides -- default to the calibrated values (see module
+                       # docstring), only used to force a verdict on demand for testing (e.g.
+                       # to prove the Slack notify fires end-to-end). GOTCHA: the workflow
+                       # engine's $.get(key, default) appears to treat 0 as "not provided" and
+                       # falls back to default -- pass a small non-zero value (e.g. 0.001), not
+                       # 0.0, to force degraded:errors. Confirmed live against enrichment-
+                       # production 2026-07-01.
+                       "session_floor": "$.get('session_floor', 80)",
+                       "odds_floor": "$.get('odds_floor', 0.02)",
+                       "err_ceiling": "$.get('err_ceiling', 0.08)"},
             "outputs": {"verdict": "$.get('sv_verdict', 'unknown')",
                         "health": "$.get('sv_health', {})", "workflow-status": "'executed'"},
             "tasks": [
@@ -284,7 +300,10 @@ def _workflow():
                  "connector": {"command": "scan_surface", "name": "surface-verify-tools"},
                  "inputs": {"posthog_key": "$TEMP_CONTEXT_VARIABLE_POSTHOG_QUERY_KEY",
                             "posthog_project": "'257767'",
-                            "window_hours": "$.get('window_hours', 6)"},
+                            "window_hours": "$.get('window_hours', 6)",
+                            "session_floor": "$.get('session_floor', 80)",
+                            "odds_floor": "$.get('odds_floor', 0.02)",
+                            "err_ceiling": "$.get('err_ceiling', 0.08)"},
                  "outputs": {"sv_health": "$.get('health')", "sv_verdict": "$.get('verdict')",
                              "sv_heal": "$.get('heal_needed')"}},
                 # auto-heal: only fires when scan said degraded:odds
