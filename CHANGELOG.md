@@ -2,6 +2,14 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.0] - 2026-07-01
+
+### Added
+- **`machina org usage --month YYYY-MM` and `--last-month`** — full-calendar-month token totals for invoicing an org for a completed month (inclusive first..last day, leap-year correct). Precedence is `--month` > `--last-month` > `--days`; the resolved window and a human label appear in the panel and in `--json` (`window.label`). Because the ledger is permanent, prior months are fully available. (#51)
+
+### Fixed
+- **`machina org usage` now reads the permanent `organization_ledger` via core-api instead of per-project agent executions.** Agent-execution token records (`execution_tokens`) are purged after ~5 days, so a "last 30d" scan really summed only the retained days and undercounted ~6× vs the Studio usage view (e.g. SBOT Prd reported ~297M instead of ~1.80B, and the total shrank day-over-day). It now uses the same ledger source as Studio, so the total matches and covers the full window. The headline + by-day come from `{scope}/{id}/usage`; the by-project / by-agent breakdown is best-effort from `{scope}/{id}/usage/export` (omitted with a note if it fails on a very large org). The per-tenant scan and INCOMPLETE/PARTIAL machinery are removed; `--json` keeps the `incomplete`/`projects_*` keys (now inert) for back-compat and adds `source` and `breakdown_available`. (#51)
+
 ## [0.4.9] - 2026-07-01
 
 ### Fixed
