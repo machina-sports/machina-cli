@@ -5,6 +5,8 @@ truth the Studio Context Graph page shows, from the CLI. Derives status live fro
 each project's context_graph_* docs + its self-heal agents (no extra state).
 """
 
+import contextlib
+import io
 import json as json_lib
 from typing import Optional
 
@@ -126,7 +128,11 @@ def status(
         if not pid:
             continue
         try:
-            st = _collect(pid)
+            # ProjectClient prints errors + raises SystemExit for unreachable /
+            # forbidden projects; silence that per-project noise (it otherwise
+            # corrupts --json and clutters the table) and skip cleanly.
+            with contextlib.redirect_stderr(io.StringIO()):
+                st = _collect(pid)
         except (SystemExit, Exception):  # noqa: BLE001
             skipped += 1
             continue
