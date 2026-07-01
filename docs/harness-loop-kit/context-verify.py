@@ -26,6 +26,14 @@ RESOLVES the cross-language links a deterministic join misses and PERSISTS them 
 `context-verify-beat` agent runs the whole sweep on a schedule (self-evolving) — the
 harness loop's verify + self-repair (Cap 8/8.2) applied to the data graph.
 
+Slack awareness (analysis<->fixture, odd<->market<->fixture only -- these are the two
+edges with a broken_rate_pct verdict; linkability's link-rate isn't inherently good/bad
+the same way): posts on a broken-rate TRANSITION for that edge -- clean->broken or
+broken->clean -- reusing the eval prompt's own assessment text as the message body (it's
+already a specific, human-written summary). Silent while an already-flagged issue stays
+open, so it doesn't re-page every scan. Shares the same `slack-notify-config` document /
+SLACK_WEBHOOK_URL as surface-verify.py -- one webhook per pod covers both.
+
 Provisions:
   connector context-verify-tools     scan_edges + scan_odds + scan_link
   prompt    context-verify-eval      edge-agnostic assessment (analysis, odds)
@@ -105,7 +113,7 @@ def _create(kind, body):
 
 # --- connector source: deterministic edge gates (pyscript, exec'd from the DB) ---
 SCAN_SRC = r'''"""Context Graph edge scanners (analysis, odds, linkability)."""
-import re, unicodedata
+import json, re, unicodedata, urllib.request, urllib.error
 from collections import defaultdict
 
 def _docs(name, extra, limit):
@@ -349,6 +357,82 @@ def resolve_link_ids(request_data: dict) -> dict:
                           "market": mk, "fixture": fx, "source": "semantic-heal"})
     return {"status": True, "data": {"links": links, "resolved": len(links),
             "deterministic": det_n, "semantic": len(links) - det_n, "rejected": rejected}}
+
+def notify_slack(request_data: dict) -> dict:
+    """Post to Slack on a broken-rate TRANSITION for one edge -- entering a broken state
+    (clean -> some broken_rate_pct) or recovering (broken -> clean). Silent while
+    unchanged, so an already-flagged, still-open issue doesn't re-page every scan.
+    Only covers edges with a broken_rate_pct signal (analysis<->fixture,
+    odd<->market<->fixture) -- the linkability edge's link-rate isn't inherently
+    good/bad the same way (many markets are structurally unlinkable outrights), so it
+    has no verdict to alert on here; this no-ops cleanly if wired to it anyway.
+    Reuses the assessment the eval prompt already wrote -- it's already a specific,
+    human-written summary, better than anything a template string could produce.
+    Best-effort: never raises (a notify failure must never fail the audit)."""
+    p = request_data.get("params", {}) or request_data
+    health = p.get("health") or {}
+    edge = health.get("edge", "unknown")
+    rate = health.get("broken_rate_pct")
+    if rate is None:
+        return {"status": True, "data": {"notified": False, "skipped": "no broken_rate_pct on this edge"}}
+
+    webhook = (p.get("webhook_url") or "").strip()
+    if not webhook or webhook.startswith("$"):
+        try:
+            from core.document.controller import document_search
+            r = document_search(filters={"name": "slack-notify-config"}, page=1, page_size=1)
+            dd = r.get("data") if isinstance(r, dict) else None
+            rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+            if rows:
+                webhook = ((rows[0].get("value") or {}).get("webhook_url") or "").strip()
+        except Exception:
+            pass
+    if not webhook:
+        return {"status": True, "data": {"notified": False, "skipped": "no webhook configured"}}
+
+    # context_graph_health holds every edge under the same document name, so filter by
+    # name then walk client-side to the first (most recent) match for THIS edge. This
+    # task runs before save-health persists the current run, so the first match found
+    # here is genuinely the prior reading -- same trick surface-verify uses.
+    prev_rate = None
+    try:
+        from core.document.controller import document_search
+        r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=20,
+                             sorters=["created", -1])
+        dd = r.get("data") if isinstance(r, dict) else None
+        rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+        for row in rows or []:
+            rv = (row.get("value") or {}).get("health") or {}
+            if rv.get("edge") == edge:
+                prev_rate = rv.get("broken_rate_pct")
+                break
+    except Exception:
+        pass
+
+    was_broken = bool(prev_rate and prev_rate > 0)
+    is_broken = rate > 0
+    if is_broken == was_broken:
+        return {"status": True, "data": {"notified": False, "skipped": "unchanged"}}
+
+    assessment = (p.get("assessment") or "").strip()
+    if is_broken:
+        headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
+        body = assessment or ("%s%% of sampled records are broken. *Needs a human* -- "
+                               "this edge has no auto-fix." % rate)
+    else:
+        headline = ":white_check_mark: *Context Graph -- recovered* (`%s`)" % edge
+        body = "Back to 0%% broken (was %s%%)." % prev_rate
+
+    text = "%s\n>%s" % (headline, body)
+    body_bytes = json.dumps({"text": text}).encode()
+    req = urllib.request.Request(webhook, data=body_bytes, method="POST",
+                                  headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
+        return {"status": True, "data": {"notified": True, "edge": edge, "rate": rate}}
+    except Exception as e:
+        return {"status": True, "data": {"notified": False, "error": str(e)[:150]}}
 '''
 
 EVAL_SCHEMA = {"title": "ContextGraphAssessment", "type": "object", "properties": {
@@ -414,6 +498,15 @@ def _audit_workflow(name, title, desc, scan_command):
                 {"name": "context-verify-eval", "type": "prompt", "connector": GENAI,
                  "inputs": {"_1-health": "$.get('cg_health', {})", "_2-flagged": "$.get('cg_flagged', [])"},
                  "outputs": {"cg_summary": "$"}},
+                # runs before save-health so it still reads the PREVIOUS reading for this
+                # edge (transition detection) -- see notify_slack's docstring. Always runs
+                # (no condition): it also fires the "recovered" message.
+                {"name": "notify", "type": "connector",
+                 "connector": {"command": "notify_slack", "name": "context-verify-tools"},
+                 "inputs": {"health": "$.get('cg_health', {})",
+                            "assessment": "$.get('cg_summary', {}).get('assessment','')",
+                            "webhook_url": "$TEMP_CONTEXT_VARIABLE_SLACK_WEBHOOK_URL"},
+                 "outputs": {"cg_notified": "$"}},
                 {"name": "save-health", "type": "document",
                  "config": {"action": "save", "embed-vector": False, "force-update": True},
                  "documents": {"context_graph_health": HVAL}},
@@ -468,7 +561,8 @@ def definitions():
              "description": "deterministic edge scanners (analysis + odds + linkability)",
              "filename": "context_verify.py", "filetype": "pyscript", "filecontent": _scan_src_for_tenant(),
              "commands": [{"name": "Scan", "value": "scan_edges"}, {"name": "ScanOdds", "value": "scan_odds"},
-                          {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"}]}
+                          {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"},
+                          {"name": "NotifySlack", "value": "notify_slack"}]}
     evaluate = {"name": "context-verify-eval", "title": "Context Verify Eval", "type": "prompt", "status": "active",
                 "description": "edge-agnostic semantic lens over graph-health findings",
                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
