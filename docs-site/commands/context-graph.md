@@ -7,13 +7,15 @@ The Context Graph is the set of **verified, self-healing edges over your data**:
 ## Usage
 
 ```text
-machina context-graph status [--project <id>] [--org] [--json]
+machina context-graph status   [--project <id>] [--org] [--json]
+machina context-graph timeline [--project <id>] [--org] [--days N] [--json]
 ```
 
 | Flag | Purpose |
 |------|---------|
 | `--project`, `-p` | A specific project (defaults to the selected project). |
-| `--org` | Roll up **every project** in the organization into one table. |
+| `--org` | Roll up **every project** in the organization. |
+| `--days`, `-d` | (`timeline`) How far back to look — default 30. |
 | `--json`, `-j` | Machine-readable output. |
 
 ## `status` — one project
@@ -65,15 +67,48 @@ One screen answers **what self-healing is provisioned where, and how healthy it 
 `context-graph status` and the Studio Context Graph page read the **same** `context_graph_*` documents, so the CLI and the UI never disagree. Use the CLI for a fast org-wide sweep; open a project in the Studio to drill into its edges, resolved links, orphans, and surface tab.
 :::
 
+## `timeline` — the self-healing event history
+
+`status` shows the *current* state; `timeline` shows the *story* — every detection, heal round, escalation, and recovery, reconstructed from the persisted graph-health trail (works retroactively, no new state):
+
+```bash
+machina context-graph timeline --days 7
+```
+
+```text
+        Self-healing timeline — last 7 day(s)
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Time (UTC)   ┃ Edge               ┃ Event     ┃ Detail                            ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Jul 01 17:25 │ analysis<->fixture │ detected  │ 13 broken                         │
+│ Jul 01 18:10 │ analysis<->fixture │ heal      │ re-research dispatched for 5      │
+│              │                    │           │ fixture(s) (+8 queued)            │
+│ Jul 01 19:12 │ analysis<->fixture │ recovered │ back to 0 broken (was 4)          │
+└──────────────┴────────────────────┴───────────┴───────────────────────────────────┘
+  1 detected · 1 heal round(s) · 1 recovered · 0 escalated to a human
+```
+
+The summary line is the ROI number: **how many times the loop found and fixed a problem before a human had to**. Events:
+
+| Event | Meaning |
+|-------|---------|
+| `detected` | An edge went from clean to broken (or the surface entered a degraded verdict). |
+| `heal` | An auto-heal round dispatched (odds refresh, or per-fixture re-research). |
+| `heal-paused` | Auto-heal hit its no-progress budget and escalated to a human. |
+| `recovered` | The edge/surface returned to clean. |
+
+`--org` merges all projects into one chronological stream (adds a Project column).
+
 ## `--json`
 
 ```bash
 machina context-graph status --org --json
+machina context-graph timeline --org --days 30 --json
 ```
 
-Emits `{ "projects": [{ "name", "id", "edges", "surface", "agents" }], "skipped": N }` — pipe into `jq` for alerts or dashboards.
+`status` emits `{ "projects": [{ "name", "id", "edges", "surface", "agents" }], "skipped": N }`; `timeline` emits `{ "events": [...], "summary": {...} }` — pipe into `jq` for alerts or dashboards.
 
 ## Related
 
-- [`loop`](/commands/loop) — the durable loop + `surface-verify` / `context-verify` workflows that produce the Context Graph state (and auto-heal `degraded:odds`).
+- [`loop`](/commands/loop) — the durable loop + `surface-verify` / `context-verify` workflows that produce the Context Graph state (and auto-heal `degraded:odds` + misattributed analyses).
 - Provisioning kit — `docs/harness-loop-kit/` in the [machina-cli repo](https://github.com/machina-sports/machina-cli).
