@@ -114,8 +114,13 @@ def _docs(name, extra, limit):
     flt = {"name": name}; flt.update(extra or {})
     # page cap follows the requested limit (was a hard `page <= 8` = max 400 docs, which
     # silently capped the fixture pull at 300 while 2k+ fixtures existed -> false orphans).
-    while len(out) < limit and page <= (limit // 50 + 2):
-        r = document_search(filters=flt, page=page, page_size=50, sorters=["_id", -1])
+    # page_size=500 (was 50): an enterprise-scale pod's full-universe pull (~4k fixtures +
+    # ~1.8k markets) took ~115 sequential 50-doc round-trips -- long enough to silently die
+    # mid-execution (no health doc, no error) rather than return an honest error. 500/page
+    # cuts that to ~12 round-trips; confirmed 1000/page pulls the same data in ~30s total.
+    page_size = 500
+    while len(out) < limit and page <= (limit // page_size + 2):
+        r = document_search(filters=flt, page=page, page_size=page_size, sorters=["_id", -1])
         dd = r.get("data") if isinstance(r, dict) else None
         batch = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
         if not batch: break
@@ -267,9 +272,13 @@ def scan_link(request_data: dict) -> dict:
     lim = _limit(p)
     try:
         # Pull the FULL fixture set (not a 300-doc slice): markets must be linkable against
-        # every fixture, not the first page. Markets are few; fixtures are the haystack.
+        # every fixture, not the first page. The 500 cap on markets was sized for the
+        # original small datasets ("markets are few") -- an enterprise-scale pod can have
+        # 1000s (SBOT Prd: ~1.8k), and unlike the universe/unresolved caps below, this one
+        # wasn't reported when it silently dropped markets before they were ever counted.
+        # Match the fixture side: pull the full set, no silent pre-count truncation.
         fdocs = _docs("sportradar-fixture", {}, max(lim, 5000))
-        mdocs = _docs("entain-markets-tier3", {}, max(lim, 500))
+        mdocs = _docs("entain-markets-tier3", {}, max(lim, 5000))
     except Exception as ex:
         return {"status": True, "data": {"health": {"edge": "market->fixture(link)", "error": str(ex)}, "unresolved_sample": [], "fixture_universe": []}}
     fixture_keys = set(); universe = []; fidx_full = {}; canon_idx = {}

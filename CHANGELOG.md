@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.6] - 2026-07-01
+
+### Fixed
+- **`context-verify`'s linkability edge silently died on enterprise-scale data.** `scan_link` pulls the full fixture + market universe, paginated at 50 docs/request — fine at hundreds of documents, but SBOT Prd (sportingbot.com) has ~4k fixtures + ~1.8k markets, meaning ~116 sequential round-trips inside one connector execution. Long enough to die mid-run server-side with no health doc and no error — not a crash, just silence. Bumped pagination to 500/request (confirmed the same data pulls in ~30s either way; ~116 round-trips → ~12). Also fixed a second, unrelated truncation in the same function: the markets pull was capped at 500 regardless of how many existed (sized for when "markets are few" — not true at 1.8k), silently dropping candidates from the join *before* any of the function's own reported drop-counts could see them.
+
 ## [0.5.5] - 2026-07-01
 
 ### Added
