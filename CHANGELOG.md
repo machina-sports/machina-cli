@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.3] - 2026-07-01
+
+### Added
+- **A "new version available" notice, shown automatically.** Any `machina` command now checks (at most once a day, cached in `~/.machina/update_check.json`) whether a newer release exists, and prints a one-line notice after the command's own output if so — pointing at `machina update`. Zero added latency on ~everything: a fresh cache is a local file read; a stale one kicks off the real GitHub check in a background thread with a 1.5s budget, so a slow network degrades to "check again next time" instead of a hang. Never blocks, never raises, never shows twice in one process, and is suppressed for `--json` output and piped/non-tty stdout so it can never corrupt a script. The REPL shows it once at startup too.
+
 ## [0.5.2] - 2026-07-01
 
 ### Added

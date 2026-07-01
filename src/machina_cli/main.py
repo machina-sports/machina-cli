@@ -8,9 +8,26 @@ from rich.text import Text
 
 from machina_cli import __version__
 from machina_cli.commands import (
-    auth, org, project, credentials, deploy, config_cmd,
-    workflow, agent, template, execution, skills,
-    connector, mapping, prompt, document, sports, factory, loop, mcp, connect,
+    auth,
+    org,
+    project,
+    credentials,
+    deploy,
+    config_cmd,
+    workflow,
+    agent,
+    template,
+    execution,
+    skills,
+    connector,
+    mapping,
+    prompt,
+    document,
+    sports,
+    factory,
+    loop,
+    mcp,
+    connect,
     context_graph,
 )
 from machina_cli.commands.auth import do_login
@@ -18,32 +35,41 @@ from machina_cli.commands.auth import do_login
 console = Console()
 
 CMD_GROUPS = [
-    ("Platform", [
-        ("login", "Authenticate"),
-        ("org", "Organizations"),
-        ("project", "Projects"),
-        ("credentials", "API keys"),
-        ("connect", "Connect an agent to a project's MCP"),
-    ]),
-    ("Resources", [
-        ("workflow", "Workflows"),
-        ("agent", "Agents"),
-        ("connector", "Connectors"),
-        ("mapping", "Mappings"),
-        ("prompt", "Prompts"),
-        ("document", "Documents"),
-    ]),
-    ("Operations", [
-        ("execution", "Executions"),
-        ("skills", "Skills"),
-        ("loop", "Agentic turn loop (harness)"),
-        ("factory", "Build apps (Factory)"),
-        ("sports", "Sports-skills passthrough"),
-        ("template", "Templates (compat)"),
-        ("deploy", "Deployments"),
-        ("mcp", "MCP connection"),
-        ("update", "Self-update"),
-    ]),
+    (
+        "Platform",
+        [
+            ("login", "Authenticate"),
+            ("org", "Organizations"),
+            ("project", "Projects"),
+            ("credentials", "API keys"),
+            ("connect", "Connect an agent to a project's MCP"),
+        ],
+    ),
+    (
+        "Resources",
+        [
+            ("workflow", "Workflows"),
+            ("agent", "Agents"),
+            ("connector", "Connectors"),
+            ("mapping", "Mappings"),
+            ("prompt", "Prompts"),
+            ("document", "Documents"),
+        ],
+    ),
+    (
+        "Operations",
+        [
+            ("execution", "Executions"),
+            ("skills", "Skills"),
+            ("loop", "Agentic turn loop (harness)"),
+            ("factory", "Build apps (Factory)"),
+            ("sports", "Sports-skills passthrough"),
+            ("template", "Templates (compat)"),
+            ("deploy", "Deployments"),
+            ("mcp", "MCP connection"),
+            ("update", "Self-update"),
+        ],
+    ),
 ]
 
 
@@ -109,7 +135,9 @@ def show_banner():
     console.print()
     console.print(layout)
     console.print()
-    console.print("  [dim]Run[/] [bold]machina[/] [bold magenta]<command>[/] [bold]--help[/] [dim]for more info[/]")
+    console.print(
+        "  [dim]Run[/] [bold]machina[/] [bold magenta]<command>[/] [bold]--help[/] [dim]for more info[/]"
+    )
     console.print()
 
 
@@ -123,7 +151,9 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    no_interactive: bool = typer.Option(False, "--no-interactive", hidden=True, help="Show banner instead of REPL"),
+    no_interactive: bool = typer.Option(
+        False, "--no-interactive", hidden=True, help="Show banner instead of REPL"
+    ),
 ):
     """CLI for the Machina AI Agent platform."""
     if not ctx.invoked_subcommand:
@@ -131,6 +161,7 @@ def main(
             show_banner()
         else:
             from machina_cli.repl import start_repl
+
             start_repl()
 
 
@@ -144,7 +175,9 @@ app.add_typer(template.app, name="template", help="Template management")
 app.add_typer(skills.app, name="skills", help="Skills management")
 app.add_typer(execution.app, name="execution", help="Execution management")
 app.add_typer(loop.app, name="loop", help="Durable agentic turn loop (harness)")
-app.add_typer(context_graph.app, name="context-graph", help="Self-healing / monitoring status across projects")
+app.add_typer(
+    context_graph.app, name="context-graph", help="Self-healing / monitoring status across projects"
+)
 app.add_typer(factory.app, name="factory", help="Trigger Factory coding-agent builds")
 app.add_typer(connector.app, name="connector", help="Connector management")
 app.add_typer(mapping.app, name="mapping", help="Mapping management")
@@ -192,8 +225,12 @@ def shell_prompt():
 @app.command()
 def login(
     api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key"),
-    with_credentials: bool = typer.Option(False, "--with-credentials", help="Use username/password instead of browser"),
-    no_interactive: bool = typer.Option(False, "--no-interactive", hidden=True, help="Don't start REPL after login"),
+    with_credentials: bool = typer.Option(
+        False, "--with-credentials", help="Use username/password instead of browser"
+    ),
+    no_interactive: bool = typer.Option(
+        False, "--no-interactive", hidden=True, help="Don't start REPL after login"
+    ),
 ):
     """Login to the Machina platform. Opens browser by default."""
     do_login(api_key=api_key, with_credentials=with_credentials)
@@ -201,6 +238,7 @@ def login(
     # After successful login, start the REPL so the user lands inside the CLI
     if not no_interactive:
         from machina_cli.repl import start_repl
+
         start_repl()
 
 
@@ -210,9 +248,15 @@ def connect_command(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     reveal: bool = typer.Option(False, "--reveal", help="Show the auth token (masked by default)"),
     probe: bool = typer.Option(False, "--probe", help="Verify the SSE endpoint is reachable"),
-    name: str = typer.Option(None, "--name", "-n", help="Server name for the agent (defaults to project id)"),
-    mint: bool = typer.Option(False, "--mint", help="Reuse or create a dedicated project API key for a durable connection"),
-    org: str = typer.Option(None, "--org", "-o", help="Organization ID for --mint (defaults to the selected org)"),
+    name: str = typer.Option(
+        None, "--name", "-n", help="Server name for the agent (defaults to project id)"
+    ),
+    mint: bool = typer.Option(
+        False, "--mint", help="Reuse or create a dedicated project API key for a durable connection"
+    ),
+    org: str = typer.Option(
+        None, "--org", "-o", help="Organization ID for --mint (defaults to the selected org)"
+    ),
 ):
     """Resolve a project's MCP connection for an external agent (e.g. sportsclaw)."""
     connect.run(project_id, json_output, reveal, probe, name, mint, org)
@@ -220,10 +264,13 @@ def connect_command(
 
 @app.command()
 def update(
-    force: bool = typer.Option(False, "--force", "-f", help="Force update even if already on latest"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force update even if already on latest"
+    ),
 ):
     """Update machina-cli to the latest version."""
     from machina_cli.updater import do_update
+
     do_update(force=force)
 
 
@@ -233,5 +280,19 @@ def version():
     console.print(f"machina-cli v{get_version()}")
 
 
+def run():
+    """Real entrypoint for both the pip console-script and the PyInstaller
+    binary (which freezes this file and runs it as __main__ -- see
+    if __name__ == "__main__" below). Click/Typer's standalone_mode raises
+    SystemExit from app() on every path (success, error, --help), so the
+    update check needs `finally`, not code placed after a plain call."""
+    try:
+        app()
+    finally:
+        from machina_cli.update_check import maybe_notify_update
+
+        maybe_notify_update()
+
+
 if __name__ == "__main__":
-    app()
+    run()

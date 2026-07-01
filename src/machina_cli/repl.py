@@ -334,6 +334,10 @@ def start_repl():
 
     _show_repl_banner()
 
+    from machina_cli.update_check import maybe_notify_update
+
+    maybe_notify_update()
+
     try:
         while True:
             try:
