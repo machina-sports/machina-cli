@@ -517,19 +517,35 @@ def notify_slack(request_data: dict) -> dict:
     # name then walk client-side to the first (most recent) match for THIS edge. This
     # task runs before save-health persists the current run, so the first match found
     # here is genuinely the prior reading -- same trick surface-verify uses.
+    # One history read serves both needs: the immediately-prior reading (transition
+    # detection) AND, on recovery, the whole incident's stats -- consecutive broken
+    # readings walking back from now (peak count, heal rounds, fixtures re-researched).
+    # Without the incident walk, the recovered message reports only the last reading
+    # ("was 1" after a 13->10->7->4->1 drain) and the story is invisible to the reader.
     prev_count, prev_budget_exceeded = None, False
+    peak, healed_total, heal_rounds = 0, 0, 0
     try:
         from core.document.controller import document_search
-        r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=20,
+        r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=50,
                              sorters=["created", -1])
         dd = r.get("data") if isinstance(r, dict) else None
         rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+        first = True
         for row in rows or []:
             rv = row.get("value") or {}
-            if (rv.get("health") or {}).get("edge") == edge:
+            if (rv.get("health") or {}).get("edge") != edge:
+                continue
+            b = (rv.get("health") or {}).get(count_field) or 0
+            if first:
                 prev_count = (rv.get("health") or {}).get(count_field)
                 prev_budget_exceeded = bool((rv.get("healed") or {}).get("budget_exceeded"))
-                break
+                first = False
+            if b <= 0:
+                break  # incident start reached
+            peak = max(peak, b)
+            hc = (rv.get("healed") or {}).get("heal_count") or 0
+            if hc:
+                healed_total += hc; heal_rounds += 1
     except Exception:
         pass
 
@@ -545,6 +561,13 @@ def notify_slack(request_data: dict) -> dict:
     if is_broken == was_broken and not newly_exhausted:
         return {"status": True, "data": {"notified": False, "skipped": "unchanged"}}
 
+    # Plain-language meaning of a broken edge, so the reader doesn't need to know the
+    # edge taxonomy to understand what users are actually seeing.
+    meaning = {
+        "analysis<->fixture": "%s match page(s) are showing a pre-match analysis that belongs to a DIFFERENT match.",
+        "odd<->market<->fixture": "%s market(s) reference odds/options from the wrong fixture.",
+    }.get(edge, "%s record(s) are attributed to the wrong entity.")
+
     assessment = (p.get("assessment") or "").strip()
     if is_broken and budget_exceeded:
         headline = ":rotating_light: *Context Graph -- could NOT self-heal* (`%s`)" % edge
@@ -555,15 +578,23 @@ def notify_slack(request_data: dict) -> dict:
         backlog = healed.get("backlog") or 0
         tail = " (%d more queued for the next scans)" % backlog if backlog else ""
         headline = ":adhesive_bandage: *Context Graph -- data issue found, self-healing* (`%s`)" % edge
-        body = ((assessment + "\n>") if assessment else "") + \
-               ("Auto-heal dispatched fresh research for %d fixture(s)%s -- the next scans verify the fix." % (heal_count, tail))
+        body = (meaning % count) + \
+               (("\n>" + assessment) if assessment else "") + \
+               ("\n>Auto-heal is re-researching each affected fixture (fresh web search + AI extraction "
+                "replaces the misattributed text) -- %d dispatched%s; the next scans verify." % (heal_count, tail))
     elif is_broken:
         headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
-        body = assessment or ("%s broken (%s%% of sample). *Needs a human* -- "
-                               "auto-heal is not configured for this edge here." % (count, rate))
+        body = (meaning % count) + \
+               (("\n>" + assessment) if assessment else "") + \
+               "\n>*Needs a human* -- auto-heal is not configured for this edge here."
     else:
         headline = ":white_check_mark: *Context Graph -- recovered* (`%s`)" % edge
-        body = "Back to 0 broken (was %s)." % prev_count
+        if healed_total:
+            body = ("Back to 0 broken -- the incident peaked at %s; auto-heal re-researched %s fixture(s) "
+                     "across %s round(s) (fresh web search + AI extraction per fixture), no human needed."
+                     % (peak, healed_total, heal_rounds))
+        else:
+            body = "Back to 0 broken (incident peaked at %s)." % (peak or prev_count)
 
     text = "%s\n>%s" % (headline, body)
     body_bytes = json.dumps({"text": text}).encode()
