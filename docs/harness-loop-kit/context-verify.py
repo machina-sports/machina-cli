@@ -358,23 +358,32 @@ def resolve_link_ids(request_data: dict) -> dict:
     return {"status": True, "data": {"links": links, "resolved": len(links),
             "deterministic": det_n, "semantic": len(links) - det_n, "rejected": rejected}}
 
+# Raw broken-COUNT field per edge, not the rounded broken_rate_pct: round(100*1/500) is
+# 0, so a genuine single broken record can silently round down to a "clean" 0% and never
+# alert. The count is exact; the percentage is just for display.
+BROKEN_COUNT_FIELD = {"analysis<->fixture": "broken_edges", "odd<->market<->fixture": "misattributed"}
+
 def notify_slack(request_data: dict) -> dict:
-    """Post to Slack on a broken-rate TRANSITION for one edge -- entering a broken state
-    (clean -> some broken_rate_pct) or recovering (broken -> clean). Silent while
-    unchanged, so an already-flagged, still-open issue doesn't re-page every scan.
-    Only covers edges with a broken_rate_pct signal (analysis<->fixture,
-    odd<->market<->fixture) -- the linkability edge's link-rate isn't inherently
-    good/bad the same way (many markets are structurally unlinkable outrights), so it
-    has no verdict to alert on here; this no-ops cleanly if wired to it anyway.
-    Reuses the assessment the eval prompt already wrote -- it's already a specific,
-    human-written summary, better than anything a template string could produce.
-    Best-effort: never raises (a notify failure must never fail the audit)."""
+    """Post to Slack on a broken TRANSITION for one edge -- entering a broken state (0
+    broken -> some) or recovering (some -> 0). Silent while unchanged, so an
+    already-flagged, still-open issue doesn't re-page every scan. Only covers edges in
+    BROKEN_COUNT_FIELD (analysis<->fixture, odd<->market<->fixture) -- the linkability
+    edge's link-rate isn't inherently good/bad the same way (many markets are
+    structurally unlinkable outrights), so it has no verdict to alert on here; this
+    no-ops cleanly if wired to it anyway. Reuses the assessment the eval prompt already
+    wrote -- it's already a specific, human-written summary, better than anything a
+    template string could produce. Best-effort: never raises (a notify failure must
+    never fail the audit)."""
     p = request_data.get("params", {}) or request_data
     health = p.get("health") or {}
     edge = health.get("edge", "unknown")
+    count_field = BROKEN_COUNT_FIELD.get(edge)
+    if count_field is None:
+        return {"status": True, "data": {"notified": False, "skipped": "edge has no broken-count signal"}}
+    count = health.get(count_field)
     rate = health.get("broken_rate_pct")
-    if rate is None:
-        return {"status": True, "data": {"notified": False, "skipped": "no broken_rate_pct on this edge"}}
+    if count is None:
+        return {"status": True, "data": {"notified": False, "skipped": "no %s on this edge" % count_field}}
 
     webhook = (p.get("webhook_url") or "").strip()
     if not webhook or webhook.startswith("$"):
@@ -394,7 +403,7 @@ def notify_slack(request_data: dict) -> dict:
     # name then walk client-side to the first (most recent) match for THIS edge. This
     # task runs before save-health persists the current run, so the first match found
     # here is genuinely the prior reading -- same trick surface-verify uses.
-    prev_rate = None
+    prev_count, prev_rate = None, None
     try:
         from core.document.controller import document_search
         r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=20,
@@ -404,24 +413,25 @@ def notify_slack(request_data: dict) -> dict:
         for row in rows or []:
             rv = (row.get("value") or {}).get("health") or {}
             if rv.get("edge") == edge:
+                prev_count = rv.get(count_field)
                 prev_rate = rv.get("broken_rate_pct")
                 break
     except Exception:
         pass
 
-    was_broken = bool(prev_rate and prev_rate > 0)
-    is_broken = rate > 0
+    was_broken = bool(prev_count and prev_count > 0)
+    is_broken = count > 0
     if is_broken == was_broken:
         return {"status": True, "data": {"notified": False, "skipped": "unchanged"}}
 
     assessment = (p.get("assessment") or "").strip()
     if is_broken:
         headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
-        body = assessment or ("%s%% of sampled records are broken. *Needs a human* -- "
-                               "this edge has no auto-fix." % rate)
+        body = assessment or ("%s broken (%s%% of sample). *Needs a human* -- "
+                               "this edge has no auto-fix." % (count, rate))
     else:
         headline = ":white_check_mark: *Context Graph -- recovered* (`%s`)" % edge
-        body = "Back to 0%% broken (was %s%%)." % prev_rate
+        body = "Back to 0 broken (was %s)." % prev_count
 
     text = "%s\n>%s" % (headline, body)
     body_bytes = json.dumps({"text": text}).encode()
