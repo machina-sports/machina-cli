@@ -196,7 +196,18 @@ def usage(
     project_id: Optional[str] = typer.Option(
         None, "--project", "-p", help="Limit to a single project"
     ),
-    days: int = typer.Option(30, "--days", "-d", help="Look back this many days"),
+    days: int = typer.Option(30, "--days", "-d", help="Rolling window: look back this many days"),
+    month: Optional[str] = typer.Option(
+        None,
+        "--month",
+        "-m",
+        help="Full calendar month YYYY-MM (e.g. 2026-06) — for invoicing. Overrides --days.",
+    ),
+    last_month: bool = typer.Option(
+        False,
+        "--last-month",
+        help="Full previous calendar month (relative to today). Overrides --days.",
+    ),
     top: int = typer.Option(10, "--top", help="Number of top agents to show"),
     limit: Optional[int] = typer.Option(
         None,
@@ -213,6 +224,7 @@ def usage(
     Studio usage view uses — so the total covers the full window and matches Studio.
     Broken down by project, agent, and day.
     """
+    import calendar as _calendar
     import json as _json
     from collections import defaultdict
     from datetime import datetime, timedelta, timezone
@@ -225,8 +237,32 @@ def usage(
         raise typer.Exit(1)
 
     now = datetime.now(timezone.utc)
-    start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    end_date = now.strftime("%Y-%m-%d")
+    # Window precedence: --month (explicit calendar month, for invoicing) >
+    # --last-month (previous full calendar month) > --days (rolling). Calendar
+    # months use inclusive first..last day; the server treats end_date as
+    # end-of-day, so a month captures 00:00:00 day 1 .. 23:59:59 last day (UTC).
+    if month:
+        try:
+            year, mon = (int(part) for part in str(month).split("-"))
+            first = datetime(year, mon, 1)
+        except (ValueError, TypeError):
+            console.print("[red]--month must be YYYY-MM (e.g. 2026-06).[/red]")
+            raise typer.Exit(1)
+        last_day = _calendar.monthrange(year, mon)[1]
+        start_date = first.strftime("%Y-%m-%d")
+        end_date = f"{year:04d}-{mon:02d}-{last_day:02d}"
+        window_label = first.strftime("%B %Y")
+    elif last_month:
+        prev_end = datetime(now.year, now.month, 1) - timedelta(days=1)
+        last_day = _calendar.monthrange(prev_end.year, prev_end.month)[1]
+        start_date = f"{prev_end.year:04d}-{prev_end.month:02d}-01"
+        end_date = f"{prev_end.year:04d}-{prev_end.month:02d}-{last_day:02d}"
+        window_label = prev_end.strftime("%B %Y")
+    else:
+        start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+        window_label = f"last {days}d"
+
     window_body = {
         "filters": {},
         "start_date": start_date,
@@ -322,7 +358,7 @@ def usage(
             "organization_id": org_id,
             "project_id": project_id,
             "source": "organization_ledger",
-            "window": {"from": start_date, "to": end_date, "days": days},
+            "window": {"from": start_date, "to": end_date, "label": window_label, "days": days},
             "totals": grand,
             "by_project": dict(sorted(by_project.items(), key=lambda kv: -kv[1]["total"])),
             "by_agent": dict(sorted(by_agent.items(), key=lambda kv: -kv[1]["total"])),
@@ -340,7 +376,7 @@ def usage(
 
     if grand_total == 0:
         console.print(
-            f"[yellow]No token usage in the last {days} day(s) for {scope} {scope_id}.[/yellow]"
+            f"[yellow]No token usage in {window_label} for {scope} {scope_id}.[/yellow]"
         )
         return
 
@@ -358,7 +394,7 @@ def usage(
     console.print(
         Panel.fit(
             scope_line
-            + f"[bold]Window:[/bold] last {days}d ({start_date} → {end_date})\n"
+            + f"[bold]Window:[/bold] {window_label} ({start_date} → {end_date})\n"
             f"[bold]Total tokens:[/bold] {grand_total:,}\n"
             f"[bold]  input:[/bold] {grand_prompt:,} ({prompt_pct:.1f}%)   "
             f"[bold]output:[/bold] {grand_completion:,} ({completion_pct:.1f}%)\n"

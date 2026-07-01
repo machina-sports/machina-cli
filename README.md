@@ -112,18 +112,24 @@ machina org list --page 2              # Page 2
 machina org list --json                # Output as JSON
 machina org create <name>              # Create organization
 machina org use <org-id>               # Set default organization
-machina org usage                      # Token consumption (last 30d), by project/agent/day
-machina org usage --days 7             # Narrow the window
+machina org usage                      # Token consumption (rolling last 30d), by project/agent/day
+machina org usage --month 2026-06      # Full calendar month — for invoicing
+machina org usage --last-month         # Full previous calendar month
+machina org usage --days 7             # Rolling window: narrow to N days
 machina org usage --project <id>       # Scope to one project
-machina org usage --json               # Output as JSON
+machina org usage --month 2026-06 --json   # Machine-readable (for billing scripts)
 ```
 
 `org usage` reports LLM token consumption from the permanent usage ledger
 (`organization_ledger`) via core-api — the same source the Studio usage view uses, so
 the total covers the full window and matches Studio. Broken down by project, agent, and
-day, with the input/output split. The by-project / by-agent breakdown is best-effort and
-may be omitted on a very large org (the headline total and by-day stay exact). Useful for
-cost/capacity tracking.
+day, with the input/output split.
+
+For **invoicing**, use `--month YYYY-MM` (or `--last-month`) to get a full calendar
+month, inclusive of the first and last day — not the rolling `--days` window. Because the
+ledger is permanent, prior months are fully available. The by-project / by-agent
+breakdown is best-effort and may be omitted on a very large org (the headline total and
+by-day stay exact).
 
 ### Projects
 

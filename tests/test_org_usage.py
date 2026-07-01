@@ -194,3 +194,52 @@ def test_usage_console_reports_headline_and_source():
     assert result.exit_code == 0, result.output
     assert "Token consumption" in result.output
     assert "organization_ledger" in result.output
+
+
+def test_month_flag_sets_full_calendar_window():
+    # Invoicing: --month YYYY-MM must cover the whole calendar month, inclusive.
+    from datetime import datetime as _dt
+
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1", "--month", "2026-02", "--json"])
+    assert result.exit_code == 0, result.output
+    window = json.loads(result.output)["window"]
+    assert window["from"] == "2026-02-01"
+    assert window["to"] == "2026-02-28"  # non-leap year: last day is the 28th
+    assert window["label"] == _dt(2026, 2, 1).strftime("%B %Y")
+
+
+def test_month_flag_handles_leap_year():
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1", "--month", "2024-02", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["window"]["to"] == "2024-02-29"  # leap day included
+
+
+def test_month_flag_rejects_bad_format():
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1", "--month", "2026-13", "--json"])
+    assert result.exit_code == 1
+    assert "YYYY-MM" in result.output
+
+
+def test_last_month_flag_is_a_full_prior_calendar_month():
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1", "--last-month", "--json"])
+    assert result.exit_code == 0, result.output
+    window = json.loads(result.output)["window"]
+    assert window["from"].endswith("-01")  # starts on the 1st
+    assert window["from"][:7] == window["to"][:7]  # same calendar month
+    assert window["label"] != "last 30d"  # not the rolling window
