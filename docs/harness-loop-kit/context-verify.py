@@ -37,9 +37,14 @@ Provisions:
 Usage:
     CLIENT_API_URL="https://<org>-<project>.org.machina.gg" \\
     API_TOKEN="<project X-Api-Token>" [MODEL="gemini-3.1-flash-lite"] \\
+    [FIXTURE_DOC_NAME="sportradar-fixture"] [MARKETS_DOC_NAME="entain-markets-tier3"] \\
     python3 context-verify.py            # provision
     python3 context-verify.py --run      # provision, run all audits, print graph health
     python3 context-verify.py --teardown # remove
+
+If this pod stores the same fixture/markets schema under a brand-prefixed doc name
+(check with a document/search sample first — same field names, different `name`),
+override FIXTURE_DOC_NAME / MARKETS_DOC_NAME instead of assuming the entain default.
 
 Runs entirely server-side in the pod — unaffected by the MCP agent-by-name
 limitation (machina-client-api#287).
@@ -55,6 +60,13 @@ import urllib.error
 BASE = os.environ.get("CLIENT_API_URL", "").rstrip("/")
 TOKEN = os.environ.get("API_TOKEN", "")
 MODEL = os.environ.get("MODEL", "gemini-3.1-flash-lite")
+# Document names are per-tenant: some pods write the same schema (bwin_fixture_id,
+# markets_tier3, pre_match_research, ...) under a brand-prefixed doc name instead of
+# the entain/sportradar default (e.g. SBOT's own pods use sportingbot-fixture /
+# sportingbot-markets-tier3). Verified field-identical before relying on this -- override
+# per pod at provision time; the default is unchanged so existing deployments are unaffected.
+FIXTURE_DOC_NAME = os.environ.get("FIXTURE_DOC_NAME", "sportradar-fixture")
+MARKETS_DOC_NAME = os.environ.get("MARKETS_DOC_NAME", "entain-markets-tier3")
 GENAI = {"command": "invoke_prompt", "location": "global", "model": MODEL,
          "name": "google-genai", "provider": "vertex_ai"}
 CTX_VARS = {"debugger": {"enabled": True}, "google-genai": {
@@ -432,10 +444,20 @@ def _link_workflow():
             ]}
 
 
+def _scan_src_for_tenant():
+    """SCAN_SRC with the two entain-specific doc names swapped for this pod's config.
+    Plain string substitution (not .format()/f-string) because SCAN_SRC is full of
+    literal { } from dict literals/comprehensions that would collide with either.
+    json.dumps() re-quotes safely; with the defaults, this is a no-op (identical output)."""
+    src = SCAN_SRC.replace('"sportradar-fixture"', json.dumps(FIXTURE_DOC_NAME))
+    src = src.replace('"entain-markets-tier3"', json.dumps(MARKETS_DOC_NAME))
+    return src
+
+
 def definitions():
     tools = {"name": "context-verify-tools", "title": "Context Verify Tools", "status": "active",
              "description": "deterministic edge scanners (analysis + odds + linkability)",
-             "filename": "context_verify.py", "filetype": "pyscript", "filecontent": SCAN_SRC,
+             "filename": "context_verify.py", "filetype": "pyscript", "filecontent": _scan_src_for_tenant(),
              "commands": [{"name": "Scan", "value": "scan_edges"}, {"name": "ScanOdds", "value": "scan_odds"},
                           {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"}]}
     evaluate = {"name": "context-verify-eval", "title": "Context Verify Eval", "type": "prompt", "status": "active",
