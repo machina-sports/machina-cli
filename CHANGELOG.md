@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.5.1] - 2026-07-01
+
+### Added
+- **`surface-verify` now pings Slack on a verdict transition.** When the live-surface monitor enters a degraded state — or recovers from one — it now posts to a Slack channel (via an incoming webhook), so a human is aware whether or not the auto-heal fixed it: `:adhesive_bandage: self-healed` (odds refresh auto-triggered, no action needed), `:rotating_light: could NOT self-heal` (odds broke and the heal didn't run/errored — needs a human), `:rotating_light: needs review` (error-rate spike — not something auto-heal can fix, likely a code regression), or `:white_check_mark: recovered`. Notifications are **edge-triggered**: an unchanged ongoing state (e.g. a multi-hour `degraded:errors` incident) never re-notifies — the Studio/CLI dashboards already show that continuously — so the channel only gets pinged for news. The webhook lives in a `slack-notify-config` document (provision by setting `SLACK_WEBHOOK_URL` when running `surface-verify.py`), same posture as the PostHog key.
+
 ## [0.5.0] - 2026-07-01
 
 ### Added
