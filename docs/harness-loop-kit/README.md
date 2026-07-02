@@ -183,6 +183,27 @@ pelo LLM e persistido pra a montagem de contexto do cliente consumir. O agent
 detect → heal → **resolve ids** → persist → repeat. *(Conservador: só links que resolvem a ids
 reais são gravados — o resto fica como órfão.)*
 
+## 6.1 `nodes.py` — biblioteca de nós compartilhados (padrão Pressbox)
+
+Os workflows da Machina já são *dados* (tasks + conditions + `$.get()`), mas cada
+automação nova vinha copiando código de ação (o notify do Slack foi escrito 2x nos
+verifies). **`nodes.py`** provisiona o connector **`machina-nodes`** — um *registry*
+de nós de ação pequenos e compostos no grafo, não no código:
+
+| Nó | Faz | Config |
+| --- | --- | --- |
+| `slack_notify` | posta um texto **já composto** no webhook do pod | doc `slack-notify-config` (o mesmo dos verifies) |
+| `github_issue` | abre issue no GitHub (title/body/labels) | doc `github-issue-config` `{token, repo}` — **inerte até existir** |
+
+Regras de todo nó: **best-effort** (nunca lança — automação acessória não pode derrubar
+o workflow que a carrega), **inerte sem config**, **composição via inputs da task**
+(o workflow compõe; o nó só executa). O workflow `machina-nodes-demo` fica provisionado
+como documentação viva do padrão.
+
+```bash
+CLIENT_API_URL=… API_TOKEN=… python3 docs/harness-loop-kit/nodes.py --run  # provisiona + smoke no Slack
+```
+
 ## 7. Pendências honestas (transparência)
 
 1. **Redeploy do MCP** ([#287](https://github.com/machina-sports/machina-client-api/issues/287)):

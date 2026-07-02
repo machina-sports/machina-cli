@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.6.3] - 2026-07-02
+
+### Added
+- **`machina-nodes` — a shared action-node library for pod workflows** (`docs/harness-loop-kit/nodes.py`). The Pressbox lesson applied to Machina's own engine: workflows are already data walked by an executor — what was missing was a registry of small, composable action nodes, so a new automation is graph wiring instead of another copy-pasted pyscript (the Slack notify logic had been written twice across the verify kits). Ships two nodes: `slack_notify` (posts a ready-composed text; webhook from the same `slack-notify-config` doc the verifies use) and `github_issue` (opens a GitHub issue; token+repo from a `github-issue-config` doc — **inert until configured**, so it deploys everywhere safely). Every node is best-effort (never raises), inert without config, and composed via task inputs. A `machina-nodes-demo` workflow ships as living documentation of the pattern.
+
 ## [0.6.2] - 2026-07-01
 
 ### Fixed
