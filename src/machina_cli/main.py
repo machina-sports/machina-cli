@@ -8,6 +8,7 @@ from rich.text import Text
 
 from machina_cli import __version__
 from machina_cli.commands import (
+    approvals,
     auth,
     org,
     project,
@@ -60,6 +61,7 @@ CMD_GROUPS = [
         "Operations",
         [
             ("execution", "Executions"),
+            ("approvals", "Human approvals"),
             ("skills", "Skills"),
             ("loop", "Agentic turn loop (harness)"),
             ("factory", "Build apps (Factory)"),
@@ -174,6 +176,7 @@ app.add_typer(agent.app, name="agent", help="Agent management")
 app.add_typer(template.app, name="template", help="Template management")
 app.add_typer(skills.app, name="skills", help="Skills management")
 app.add_typer(execution.app, name="execution", help="Execution management")
+app.add_typer(approvals.app, name="approvals", help="Human approvals (workflow checkpoints)")
 app.add_typer(loop.app, name="loop", help="Durable agentic turn loop (harness)")
 app.add_typer(
     context_graph.app, name="context-graph", help="Self-healing / monitoring status across projects"

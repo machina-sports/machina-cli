@@ -67,6 +67,6 @@ machina workflow list
 | --- | --- |
 | **Platform** | `login` · `org` · `project` · `credentials` · `connect` · `mcp` |
 | **Resources** | `workflow` · `agent` · `connector` · `mapping` · `prompt` · `document` |
-| **Operations** | `execution` · `skills` · `factory` · `loop` · `context-graph` · `sports` · `template` · `deploy` · `config` · `update` |
+| **Operations** | `execution` · `approvals` · `skills` · `factory` · `loop` · `context-graph` · `sports` · `template` · `deploy` · `config` · `update` |
 
 New here? Start with [Installation](/guide/installation), then the [Quickstart](/guide/quickstart).

@@ -78,6 +78,7 @@ export default defineConfig({
           text: "Operations",
           items: [
             { text: "execution", link: "/commands/execution" },
+            { text: "approvals", link: "/commands/approvals" },
             { text: "skills", link: "/commands/skills" },
             { text: "factory", link: "/commands/factory" },
             { text: "loop", link: "/commands/loop" },

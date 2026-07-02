@@ -31,6 +31,7 @@ REPL_COMMANDS = [
     "factory",
     "template",
     "execution",
+    "approvals",
     "credentials",
     "deploy",
     "config",
@@ -94,6 +95,7 @@ SUB_COMMANDS = {
     ],
     "template": ["list", "install", "push"],
     "execution": ["get", "list"],
+    "approvals": ["list", "approve", "reject"],
     "credentials": ["list", "generate", "revoke"],
     "deploy": ["start", "status", "restart"],
     "config": ["list", "set", "get"],
@@ -203,6 +205,7 @@ def _show_help():
             "Operations",
             [
                 ("execution list|get <id>", "Execution history"),
+                ("approvals list|approve|reject <id>", "Human approval checkpoints"),
                 ("skills list|install|info|run|push|constructor", "Skills-first surface"),
                 ("factory run|status|watch|logs|list", "Build apps (Factory coding-agent)"),
                 ("sports <module> <command>", "Sports-skills passthrough"),
