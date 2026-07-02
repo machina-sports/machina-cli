@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.7.0] - 2026-07-02
+
+### Added
+- **Human approval checkpoints — `machina approvals` + the `compose_approval`/`resolve_approval` nodes.** A workflow that produces something risky or publishable (an AI-written article, a bulk change) can now gate its final action behind a human: it composes an `approval-request` document (title, preview, and the workflow+inputs that should run **if approved**), saves it, and posts the ask to Slack — the request side is three tasks from the `machina-nodes` library (the provisioned `machina-approval-demo` is a copyable example; an actionless request works too, as a pure acknowledgment gate). The human resolves via `machina approvals list / approve / reject`; resolution executes the in-pod `machina-approval-resolve` workflow, so every surface (CLI, Studio, MCP) shares the same logic — approve dispatches the stored action in-pod, reject just records, double-resolution is guarded, and a dispatch failure is recorded and surfaced without un-approving the decision. This is the Pressbox adoption plan's step ② and the Loop-Engineering "keep one door open" checkpoint as a first-class workflow primitive.
+
 ## [0.6.3] - 2026-07-02
 
 ### Added
