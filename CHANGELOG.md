@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.7.1] - 2026-07-08
+
+### Added
+- **Arena Context Graph certification edges.** `machina context-graph status` now renders `arena:*` edges with Arena-native badges: `certified` for passing artifacts, `repair` for artifacts that need a fix, and `blocked` for hard failures. The detail line includes gate pass rate, judge score, approval state, and failed gates when present, so Factory/Arena certification proof is visible from the same CLI surface as live Context Graph health. (#65)
+
 ## [0.7.0] - 2026-07-02
 
 ### Added
