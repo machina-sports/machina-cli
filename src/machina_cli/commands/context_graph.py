@@ -38,6 +38,26 @@ def _docs(client: ProjectClient, name: str, page_size: int = 12) -> list:
 
 def _edge_summary(edge: str, h: dict) -> tuple:
     """(badge, color, detail) for one context_graph_health edge."""
+    if edge.startswith("arena:"):
+        decision = h.get("decision")
+        badge, color = {
+            "pass": ("certified", "green"),
+            "repair": ("repair", "yellow"),
+            "block": ("blocked", "red"),
+        }.get(decision, (decision or "arena", "yellow"))
+        parts = []
+        gates = h.get("gate_pass_rate_pct")
+        if gates is not None:
+            parts.append(f"gates {gates}%")
+        judge = h.get("judge_score")
+        if judge is not None:
+            parts.append(f"judge {judge}")
+        if "approval" in str(h.get("next_action", "")):
+            parts.append("approval")
+        failed = h.get("failed_gates")
+        if failed:
+            parts.append(",".join(str(g) for g in failed))
+        return (badge, color, " · ".join(parts) if parts else "—")
     if edge == "market<->team_urn":
         unresolved = h.get("linkable_unresolved")
         if unresolved and unresolved > 0:
