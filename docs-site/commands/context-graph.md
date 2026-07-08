@@ -36,7 +36,7 @@ enrichment-production (6a41b3c4…)
 
 Each line is one part of the layer:
 
-- **edge** — a verified Context Graph edge and its health. `linked` / `ok` (green) or `degraded` / `unlinked` (red), with the headline number (link rate, broken rate, or unresolved count).
+- **edge** — a verified Context Graph edge and its health. `linked` / `ok` (green) or `degraded` / `unlinked` (red), with the headline number (link rate, broken rate, or unresolved count). Arena certification edges render as `certified` (green), `repair` (yellow), or `blocked` (red), with gate pass rate, judge score, approval state, and failed gates when present.
 - **surface** — the live odds/error verdict for real users (`ok` · `low_traffic` · `degraded:odds` · `degraded:errors`), with **session-normalized** signals and the exception count.
 - **agent** — the self-heal agents (`surface-watch-beat`, `loop-beat`, `loop-runner`) and whether they're actually running.
 
