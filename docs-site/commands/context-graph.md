@@ -38,7 +38,7 @@ Each line is one part of the layer:
 
 - **edge** — a verified Context Graph edge and its health. `linked` / `ok` (green) or `degraded` / `unlinked` (red), with the headline number (link rate, broken rate, or unresolved count). Arena certification edges render as `certified` (green), `repair` (yellow), or `blocked` (red), with gate pass rate, judge score, approval state, and failed gates when present.
 - **surface** — the live odds/error verdict for real users (`ok` · `low_traffic` · `degraded:odds` · `degraded:errors`), with **session-normalized** signals and the exception count.
-- **agent** — the self-heal agents (`surface-watch-beat`, `loop-beat`, `loop-runner`) and whether they're actually running.
+- **agent** — the self-heal agents (`surface-watch-beat`, `loop-beat`, `loop-runner`, `context-verify-beat`, `context-verify-runner`, `context-heal-runner`) and whether they're actually running. Edge and surface rows also show the evidence age — anything older than 24h renders as `(stale)` and is never green.
 
 ::: warning A beat that says `active` but `scheduled=True` is silently dead
 The platform's frequency beat only dispatches agents with **`scheduled=False` + `status=active` + a `config-frequency`**. `status` flags an `active` agent that is `scheduled=True` as **`scheduled=True (won't fire)`** — the trap that makes a monitor look enabled while it never runs. Fix with `PUT /agent/<id> {"scheduled": false, "status": "active"}`.

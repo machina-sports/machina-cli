@@ -2,6 +2,14 @@
 
 All notable changes to machina-cli are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **`context-verify-beat` can now actually fire.** The harness-loop-kit provisioner created the beat with `scheduled: true`, but the platform dispatcher only fires `scheduled: false` agents (the cron path is silently never dispatched without a real cron) — so the sweep was structurally dead even after being activated. It is now provisioned `scheduled: false`, the same contract as `loop-beat`/`surface-watch-beat`. Part of the Context Graph phase-A hardening (86ajj3jn6).
+
+### Changed
+- **`context-graph status` sees the whole self-heal layer and stops trusting old evidence.** The agent roster now includes `context-verify-beat`, `context-verify-runner` and `context-heal-runner` (previously invisible in Studio/CLI), the `--org` Beat column also recognizes `context-verify-beat`, and every edge/surface row shows its evidence age — evidence older than 24h renders as `(stale)` and is never green.
+
 ## [0.7.1] - 2026-07-08
 
 ### Added
