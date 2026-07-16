@@ -800,9 +800,12 @@ def definitions():
     runner = {"name": "context-verify-runner", "title": "Context Verify Runner", "status": "inactive", "scheduled": False,
               "description": "on-demand executor — runs every edge audit + heal",
               "context-agent": {"limit": "$.get('limit', 200)"}, "workflows": edge_workflows}
-    # self-evolving: a scheduled sweep that keeps the graph healed as new data lands.
+    # self-evolving: a frequency sweep that keeps the graph healed as new data lands.
     # Created INACTIVE (shared pod) — set status:active + tune config-frequency to enable.
-    beat = {"name": "context-verify-beat", "title": "Context Verify Beat", "status": "inactive", "scheduled": True,
+    # scheduled MUST be False: the platform dispatcher only fires scheduled=False agents
+    # (scheduled=True is the cron path and, without a real cron, is silently never
+    # dispatched) — same contract as loop-beat / surface-watch-beat.
+    beat = {"name": "context-verify-beat", "title": "Context Verify Beat", "status": "inactive", "scheduled": False,
             "description": "continuous self-healing sweep of the context graph (set status:active to enable)",
             "context": {"config-frequency": 60}, "context-agent": {"limit": "$.get('limit', 200)"},
             "workflows": edge_workflows}

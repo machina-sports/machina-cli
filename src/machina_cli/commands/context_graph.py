@@ -24,7 +24,47 @@ app = typer.Typer(help="Context Graph — self-healing status")
 console = Console()
 
 # agents that make up the self-healing / monitoring layer
-SELF_HEAL_AGENTS = ("surface-watch-beat", "loop-beat", "loop-runner")
+SELF_HEAL_AGENTS = (
+    "surface-watch-beat",
+    "loop-beat",
+    "loop-runner",
+    "context-verify-beat",
+    "context-verify-runner",
+    "context-heal-runner",
+)
+
+# evidence older than this renders as stale — stale is never green (86ajj3jn6)
+STALE_AFTER = timedelta(hours=24)
+
+
+def _apply_staleness(badge: str, color: str, detail: str, seen: str, now: Optional[datetime] = None) -> tuple:
+    """Overlay doc freshness on an edge/surface summary.
+
+    A clean edge whose evidence is old is not "ok" — it is unverified. Downgrades
+    green to yellow past STALE_AFTER and always shows the evidence age; entries
+    without a parseable timestamp are left untouched (we can't claim stale).
+    """
+    try:
+        dt = parsedate_to_datetime(seen)
+    except Exception:  # noqa: BLE001
+        return badge, color, detail
+    if dt is None:
+        return badge, color, detail
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    age = now - dt
+    if age.total_seconds() < 0:
+        age = timedelta(0)
+    if age.days >= 1:
+        age_s = f"{age.days}d"
+    elif age.seconds >= 3600:
+        age_s = f"{age.seconds // 3600}h"
+    else:
+        age_s = f"{max(age.seconds // 60, 1)}m"
+    if age > STALE_AFTER:
+        return (f"{badge} (stale)", "yellow" if color == "green" else color, f"{detail} · seen {age_s} ago")
+    return badge, color, f"{detail} · {age_s} ago"
 
 
 def _docs(client: ProjectClient, name: str, page_size: int = 12) -> list:
@@ -78,9 +118,11 @@ def _collect(project_id: str) -> dict:
         h = (doc.get("value") or {}).get("health") or {}
         e = h.get("edge")
         if e and e not in edges:
+            h["_seen"] = str(doc.get("updated") or doc.get("created") or "")
             edges[e] = h
     surf_docs = _docs(client, "context_graph_surface_health", 1)
     surface = (surf_docs[0].get("value") or {}) if surf_docs else None
+    surface_seen = str(surf_docs[0].get("updated") or surf_docs[0].get("created") or "") if surf_docs else ""
     agents = {}
     ar = client.post("agent/search", {"filters": {}, "page": 1, "page_size": 100})
     ad = ar.get("data")
@@ -92,7 +134,7 @@ def _collect(project_id: str) -> dict:
                 "freq": (a.get("context") or {}).get("config-frequency"),
                 "last": str(a.get("last_execution_date") or a.get("updated") or "")[:19],
             }
-    return {"edges": edges, "surface": surface, "agents": agents}
+    return {"edges": edges, "surface": surface, "surface_seen": surface_seen, "agents": agents}
 
 
 def _render_one(name: str, pid: str, st: dict) -> None:
@@ -102,6 +144,7 @@ def _render_one(name: str, pid: str, st: dict) -> None:
         return
     for edge, h in st["edges"].items():
         badge, color, detail = _edge_summary(edge, h)
+        badge, color, detail = _apply_staleness(badge, color, detail, h.get("_seen", ""))
         console.print(f"  edge [bold]{edge:24}[/] [{color}]{badge:9}[/] [dim]{detail}[/]")
     s = st["surface"]
     if s:
@@ -109,6 +152,7 @@ def _render_one(name: str, pid: str, st: dict) -> None:
         h = s.get("health") or {}
         color = "green" if v == "ok" else "yellow" if v == "low_traffic" else "red"
         sig = f"sessions {h.get('sessions', h.get('users', 0))} · {h.get('exceptions', 0)} exc · err/s {h.get('err_per_session', h.get('err_per_user', 0))}"
+        v, color, sig = _apply_staleness(v, color, sig, st.get("surface_seen", ""))
         console.print(f"  surface [bold]odds/errors[/]        [{color}]{v:9}[/] [dim]{sig}[/]")
     for an in SELF_HEAL_AGENTS:
         a = st["agents"].get(an)
@@ -181,7 +225,7 @@ def status(
         if s:
             v = s.get("verdict", "?")
             surf = f"[{'green' if v == 'ok' else 'yellow' if v == 'low_traffic' else 'red'}]{v}[/]"
-        beat = st["agents"].get("surface-watch-beat") or st["agents"].get("loop-beat")
+        beat = st["agents"].get("surface-watch-beat") or st["agents"].get("loop-beat") or st["agents"].get("context-verify-beat")
         if beat:
             live = beat["status"] == "active" and beat["scheduled"] is False
             beat_s = "[green]live[/]" if live else ("[red]active/scheduled=True[/]" if beat["status"] == "active" else "[dim]off[/]")
