@@ -30,6 +30,7 @@ from machina_cli.commands import (
     mcp,
     connect,
     context_graph,
+    create,
 )
 from machina_cli.commands.auth import do_login
 
@@ -39,6 +40,7 @@ CMD_GROUPS = [
     (
         "Platform",
         [
+            ("create", "Scaffold deployable apps"),
             ("login", "Authenticate"),
             ("org", "Organizations"),
             ("project", "Projects"),
@@ -169,6 +171,7 @@ def main(
 
 # Register sub-commands
 app.add_typer(auth.app, name="auth", help="Authentication (login, logout, whoami)")
+app.add_typer(create.app, name="create", help="Scaffold deployable Machina apps")
 app.add_typer(org.app, name="org", help="Organization management")
 app.add_typer(project.app, name="project", help="Project management")
 app.add_typer(workflow.app, name="workflow", help="Workflow management")

@@ -142,6 +142,17 @@ machina project use <project-id>       # Set default project
 machina project status                 # Deployment status
 ```
 
+### One-click AI apps
+
+```bash
+machina create ai-app "Match Center"
+cd match-center
+cp .env.example .env.local
+npm install && npm run dev
+```
+
+The command downloads the canonical `machina-sports/machina-boilerplate`, replaces app-name placeholders, and initializes a Git repository. The generated app includes streaming chat, server-side Machina pod integration, and GitHub Actions for frontend staging/production plus backend production on AWS or Azure.
+
 ### Workflows
 
 ```bash

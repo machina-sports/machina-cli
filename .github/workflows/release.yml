@@ -45,6 +45,7 @@ jobs:
           --hidden-import machina_cli.commands.credentials
           --hidden-import machina_cli.commands.deploy
           --hidden-import machina_cli.commands.config_cmd
+          --hidden-import machina_cli.commands.create
           --collect-all machina_cli
           src/machina_cli/main.py
 
