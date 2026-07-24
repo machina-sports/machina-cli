@@ -2,7 +2,10 @@
 
 All notable changes to machina-cli are documented here.
 
-## [Unreleased]
+## [0.8.0] - 2026-07-24
+
+### Added
+- **`machina create ai-app <name>` — scaffold the canonical Machina AI chat app.** Downloads `machina-sports/machina-boilerplate@main` (the same canonical source the Factory One-Click card deploys), personalizes the `{{APP_NAME}}`/`{{APP_SLUG}}` placeholders across the tree (repo name, browser-tab title, health endpoint), and leaves a ready-to-run Next.js chat app wired for a Machina project pod (`MACHINA_API_URL`/`MACHINA_API_KEY` server-side envs; agent `machina-assistant-executor`). Safety rails: rejects unsafe archive paths, refuses non-empty output directories, and accepts `--template-ref` to pin a candidate branch for testing. (#68)
 
 ### Fixed
 - **`context-verify-beat` can now actually fire.** The harness-loop-kit provisioner created the beat with `scheduled: true`, but the platform dispatcher only fires `scheduled: false` agents (the cron path is silently never dispatched without a real cron) — so the sweep was structurally dead even after being activated. It is now provisioned `scheduled: false`, the same contract as `loop-beat`/`surface-watch-beat`. Part of the Context Graph phase-A hardening (86ajj3jn6).
