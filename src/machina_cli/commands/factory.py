@@ -14,7 +14,6 @@ Examples:
 
 import json as json_lib
 import time
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -28,8 +27,13 @@ console = Console()
 
 # Job lifecycle states (machina-factory-customers jobStatusEnum).
 ACTIVE_STATUSES = {
-    "queued", "paused", "provisioning", "running",
-    "verifying", "committing", "deploying",
+    "queued",
+    "paused",
+    "provisioning",
+    "running",
+    "verifying",
+    "committing",
+    "deploying",
 }
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
@@ -46,12 +50,14 @@ def _status_color(status: str) -> str:
     return "dim"
 
 
-def _parse_repo(repo: Optional[str]) -> Optional[dict]:
+def _parse_repo(repo: str | None) -> dict | None:
     """`owner/name` → {owner, repo}. Errors clearly on a malformed value."""
     if not repo:
         return None
     if "/" not in repo:
-        console.print(f"[red]Invalid --repo '{repo}'. Use owner/name (e.g. machina-sports/sports-skills).[/red]")
+        console.print(
+            f"[red]Invalid --repo '{repo}'. Use owner/name (e.g. machina-sports/sports-skills).[/red]"
+        )
         raise SystemExit(1)
     owner, name = repo.split("/", 1)
     return {"owner": owner.strip(), "repo": name.strip()}
@@ -60,15 +66,21 @@ def _parse_repo(repo: Optional[str]) -> Optional[dict]:
 @app.command("run")
 def run(
     prompt: str = typer.Argument(..., help="What to build (natural language)"),
-    repo: Optional[str] = typer.Option(None, "--repo", "-r", help="Target repo as owner/name"),
-    mode: Optional[str] = typer.Option(None, "--mode", "-m", help=f"Category chip: {', '.join(VALID_MODES)}"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
-    watch_progress: bool = typer.Option(False, "--watch", "-w", help="Follow progress until the build finishes"),
+    repo: str | None = typer.Option(None, "--repo", "-r", help="Target repo as owner/name"),
+    mode: str | None = typer.Option(
+        None, "--mode", "-m", help=f"Category chip: {', '.join(VALID_MODES)}"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    watch_progress: bool = typer.Option(
+        False, "--watch", "-w", help="Follow progress until the build finishes"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Kick off a new Factory build from a prompt."""
     if mode and mode not in VALID_MODES:
-        console.print(f"[red]Invalid --mode '{mode}'. Choose one of: {', '.join(VALID_MODES)}.[/red]")
+        console.print(
+            f"[red]Invalid --mode '{mode}'. Choose one of: {', '.join(VALID_MODES)}.[/red]"
+        )
         raise SystemExit(1)
 
     client = FactoryClient(project_id)
@@ -101,13 +113,15 @@ def run(
         console.print_json(json_lib.dumps(result, default=str))
         return
 
-    console.print(Panel(
-        f"[bold]Job ID:[/bold] {job_id}\n"
-        f"[bold]Track:[/bold] machina factory status {job_id}\n"
-        f"[bold]Logs:[/bold]  machina factory logs {job_id} --follow",
-        title="Build Started",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Job ID:[/bold] {job_id}\n"
+            f"[bold]Track:[/bold] machina factory status {job_id}\n"
+            f"[bold]Logs:[/bold]  machina factory logs {job_id} --follow",
+            title="Build Started",
+            border_style="#FF5C1F",
+        )
+    )
 
     if watch_progress and job_id:
         _watch(client, job_id)
@@ -116,7 +130,7 @@ def run(
 @app.command("status")
 def status(
     job_id: str = typer.Argument(..., help="Job ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Show a job's status and its build chain (continuations, deploys)."""
@@ -133,7 +147,7 @@ def status(
 @app.command("watch")
 def watch(
     job_id: str = typer.Argument(..., help="Job ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
 ):
     """Poll a job until it reaches a terminal status."""
     client = FactoryClient(project_id)
@@ -144,7 +158,7 @@ def watch(
 def logs(
     job_id: str = typer.Argument(..., help="Job ID"),
     follow: bool = typer.Option(False, "--follow", "-f", help="Stream live progress (SSE)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
 ):
     """Stream the live build timeline for a job."""
     client = FactoryClient(project_id)
@@ -181,8 +195,10 @@ def logs(
 def follow_up(
     job_id: str = typer.Argument(..., help="Parent job ID"),
     prompt: str = typer.Argument(..., help="What to change next"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
-    watch_progress: bool = typer.Option(False, "--watch", "-w", help="Follow progress until finished"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    watch_progress: bool = typer.Option(
+        False, "--watch", "-w", help="Follow progress until finished"
+    ),
 ):
     """Iterate on a finished build with a follow-up instruction."""
     client = FactoryClient(project_id)
@@ -190,11 +206,13 @@ def follow_up(
         result = client.post(f"/c/api/projects/{job_id}/follow-up", {"prompt": prompt})
 
     new_id = result.get("projectId") or result.get("jobId") or result.get("id", job_id)
-    console.print(Panel(
-        f"[bold]Continuation job:[/bold] {new_id}",
-        title="Follow-up Started",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Continuation job:[/bold] {new_id}",
+            title="Follow-up Started",
+            border_style="#FF5C1F",
+        )
+    )
     if watch_progress and new_id:
         _watch(client, new_id)
 
@@ -202,7 +220,7 @@ def follow_up(
 @app.command("cancel")
 def cancel(
     job_id: str = typer.Argument(..., help="Job ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
 ):
     """Cancel a running build."""
     client = FactoryClient(project_id)
@@ -214,7 +232,7 @@ def cancel(
 @app.command("open-pr")
 def open_pr(
     job_id: str = typer.Argument(..., help="Job ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
 ):
     """Open (or reveal) the pull request for a completed build."""
     client = FactoryClient(project_id)
@@ -223,18 +241,20 @@ def open_pr(
     pr_number = result.get("prNumber", "")
     if pr_url:
         already = " [dim](already open)[/dim]" if result.get("alreadyOpen") else ""
-        console.print(Panel(
-            f"[bold]PR #{pr_number}:[/bold] {pr_url}{already}",
-            title="Pull Request",
-            border_style="#FF5C1F",
-        ))
+        console.print(
+            Panel(
+                f"[bold]PR #{pr_number}:[/bold] {pr_url}{already}",
+                title="Pull Request",
+                border_style="#FF5C1F",
+            )
+        )
     else:
         console.print(f"  [yellow]No PR available yet for {job_id}.[/yellow]")
 
 
 @app.command("list")
 def list_jobs(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List your active and recent Factory builds."""
@@ -258,7 +278,12 @@ def list_jobs(
         table.add_column("Status")
         for j in active:
             st = j.get("status", "")
-            table.add_row(j.get("id", ""), j.get("repo", ""), j.get("task", ""), f"[{_status_color(st)}]{st}[/{_status_color(st)}]")
+            table.add_row(
+                j.get("id", ""),
+                j.get("repo", ""),
+                j.get("task", ""),
+                f"[{_status_color(st)}]{st}[/{_status_color(st)}]",
+            )
         console.print(table)
 
     if recent:
@@ -268,13 +293,18 @@ def list_jobs(
         table.add_column("Task")
         table.add_column("Completed", style="dim")
         for j in recent:
-            table.add_row(j.get("id", ""), j.get("repo", ""), j.get("task", ""), str(j.get("completedAt", "") or ""))
+            table.add_row(
+                j.get("id", ""),
+                j.get("repo", ""),
+                j.get("task", ""),
+                str(j.get("completedAt", "") or ""),
+            )
         console.print(table)
 
 
 @app.command("whoami")
 def whoami(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Studio project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Studio project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Show the studio identity Factory sees for you."""
@@ -287,20 +317,25 @@ def whoami(
 
     # Recognized if Factory returned a uid (session) or an org (api-key).
     if not me.get("uid") and not me.get("organization"):
-        console.print("[yellow]Factory does not recognize you.[/yellow] Run [bold]machina login[/bold] (or set a valid project API key).")
+        console.print(
+            "[yellow]Factory does not recognize you.[/yellow] Run [bold]machina login[/bold] (or set a valid project API key)."
+        )
         return
 
-    console.print(Panel.fit(
-        f"[bold]Auth mode:[/bold] {me.get('authKind') or client.mode}\n"
-        f"[bold]User ID:[/bold] {me.get('uid') or 'N/A (api-key)'}\n"
-        f"[bold]Organization:[/bold] {me.get('organization', 'N/A')}\n"
-        f"[bold]Project:[/bold] {me.get('projectNamespace', 'N/A')} ({me.get('projectId', 'N/A')})",
-        title="Factory Identity",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Auth mode:[/bold] {me.get('authKind') or client.mode}\n"
+            f"[bold]User ID:[/bold] {me.get('uid') or 'N/A (api-key)'}\n"
+            f"[bold]Organization:[/bold] {me.get('organization', 'N/A')}\n"
+            f"[bold]Project:[/bold] {me.get('projectNamespace', 'N/A')} ({me.get('projectId', 'N/A')})",
+            title="Factory Identity",
+            border_style="#FF5C1F",
+        )
+    )
 
 
 # -- helpers ------------------------------------------------------------------
+
 
 def _render_chain(chain: dict):
     """Render a chain payload (root/current/ancestors/descendants) as a table."""
@@ -371,7 +406,9 @@ def _watch(client: FactoryClient, job_id: str, timeout: int = 1800):
         try:
             pr = client.post(f"/c/api/jobs/{job_id}/open-pr")
             if pr.get("prUrl"):
-                console.print(f"\n  [bold green]PR #{pr.get('prNumber', '')}:[/bold green] {pr['prUrl']}")
+                console.print(
+                    f"\n  [bold green]PR #{pr.get('prNumber', '')}:[/bold green] {pr['prUrl']}"
+                )
         except SystemExit:
             pass
     elif elapsed >= timeout:

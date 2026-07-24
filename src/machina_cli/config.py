@@ -3,7 +3,6 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 CONFIG_DIR = Path.home() / ".machina"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -39,7 +38,7 @@ def save_config(config: dict):
     os.chmod(CONFIG_FILE, 0o600)
 
 
-def get_config(key: str) -> Optional[str]:
+def get_config(key: str) -> str | None:
     config = load_config()
     return config.get(key)
 
@@ -72,7 +71,7 @@ def store_credential(key: str, value: str):
     _save_creds(creds)
 
 
-def get_credential(key: str) -> Optional[str]:
+def get_credential(key: str) -> str | None:
     """Retrieve a credential from ~/.machina/credentials.json."""
     return _load_creds().get(key)
 
@@ -99,6 +98,7 @@ def _is_jwt_expired(token: str) -> bool:
     """Check if a JWT token is expired by decoding the payload."""
     import base64
     import time
+
     try:
         payload_b64 = token.split(".")[1]
         payload_b64 += "=" * (4 - len(payload_b64) % 4)

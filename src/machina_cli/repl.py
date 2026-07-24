@@ -4,9 +4,9 @@ Opens an interactive shell where commands are entered without the `machina` pref
 Shows current org/project context in the prompt. Exit with `exit` or Ctrl+D.
 """
 
+import os
 import readline
 import shlex
-import os
 
 from rich.console import Console
 from rich.text import Text

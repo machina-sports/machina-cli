@@ -1,12 +1,10 @@
 """Execution management commands."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
 
@@ -17,8 +15,10 @@ console = Console()
 @app.command("get")
 def get_execution(
     execution_id: str = typer.Argument(..., help="Agent execution ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
-    compact: bool = typer.Option(False, "--compact", "-c", help="Compact output (no workflow details)"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    compact: bool = typer.Option(
+        False, "--compact", "-c", help="Compact output (no workflow details)"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Get execution details by ID."""
@@ -30,6 +30,7 @@ def get_execution(
 
     if json_output:
         import json
+
         console.print_json(json.dumps(data, default=str))
         return
 
@@ -38,11 +39,19 @@ def get_execution(
         return
 
     status = data.get("status", "unknown")
-    color = "green" if status in ("agent-executed", "completed", "success") else "red" if "fail" in status else "yellow"
+    color = (
+        "green"
+        if status in ("agent-executed", "completed", "success")
+        else "red"
+        if "fail" in status
+        else "yellow"
+    )
 
     # Execution time formatting
     exec_time = data.get("execution_time")
-    exec_time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else str(exec_time or "N/A")
+    exec_time_str = (
+        f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else str(exec_time or "N/A")
+    )
 
     # Tokens
     tokens = data.get("execution_tokens", {})
@@ -73,6 +82,7 @@ def get_execution(
     response = data.get("response")
     if response and isinstance(response, dict):
         import json
+
         formatted = json.dumps(response, indent=2, default=str, ensure_ascii=False)
         if len(formatted) > 2000:
             formatted = formatted[:2000] + "\n... (use --json for full output)"
@@ -92,7 +102,13 @@ def get_execution(
             if not isinstance(wf, dict):
                 continue
             wf_status = wf.get("status", "")
-            wf_color = "green" if wf_status in ("completed", "success") else "red" if "fail" in wf_status else "yellow"
+            wf_color = (
+                "green"
+                if wf_status in ("completed", "success")
+                else "red"
+                if "fail" in wf_status
+                else "yellow"
+            )
             wf_time = wf.get("execution_time")
             wf_time_str = f"{wf_time:.1f}s" if isinstance(wf_time, (int, float)) else ""
             table.add_row(
@@ -107,24 +123,28 @@ def get_execution(
 
 @app.command("list")
 def list_executions(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     page: int = typer.Option(1, "--page", help="Page number"),
     page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List recent agent executions."""
     client = ProjectClient(project_id)
-    result = client.post("execution/agent-search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["_id", -1],
-    })
+    result = client.post(
+        "execution/agent-search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["_id", -1],
+        },
+    )
 
     executions = result.get("data", [])
 
     if json_output:
         import json
+
         console.print_json(json.dumps(executions, default=str))
         return
 
@@ -141,7 +161,13 @@ def list_executions(
 
     for ex in executions:
         status = ex.get("status", "")
-        color = "green" if status in ("agent-executed", "completed", "success") else "red" if "fail" in status else "yellow"
+        color = (
+            "green"
+            if status in ("agent-executed", "completed", "success")
+            else "red"
+            if "fail" in status
+            else "yellow"
+        )
         exec_time = ex.get("execution_time")
         time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else ""
         total_wf = ex.get("total_workflows")

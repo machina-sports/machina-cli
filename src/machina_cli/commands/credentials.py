@@ -1,7 +1,6 @@
 """API key and credentials management commands."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -17,8 +16,8 @@ console = Console()
 @app.command()
 def generate(
     name: str = typer.Option("client-api", "--name", "-n", help="Name for the API key"),
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     level: str = typer.Option("SERVICE_ACCESS", "--level", "-l", help="Permission level"),
 ):
     """Generate a new API key."""
@@ -30,15 +29,20 @@ def generate(
         project_id = get_config("default_project_id")
 
     if not org_id or not project_id:
-        console.print("[red]Organization and project are required. Set defaults or use --org/--project.[/red]")
+        console.print(
+            "[red]Organization and project are required. Set defaults or use --org/--project.[/red]"
+        )
         raise typer.Exit(1)
 
-    result = client.post("system/api/generate-key", {
-        "organization_id": org_id,
-        "project_id": project_id,
-        "name": name,
-        "level": level,
-    })
+    result = client.post(
+        "system/api/generate-key",
+        {
+            "organization_id": org_id,
+            "project_id": project_id,
+            "name": name,
+            "level": level,
+        },
+    )
 
     api_key = result.get("data", {}).get("api_key", "")
     console.print("\n[green]API key generated:[/green]\n")
@@ -55,9 +59,13 @@ def _mask_key(value: str) -> str:
 
 @app.command("list")
 def list_keys(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
-    show_keys: bool = typer.Option(False, "--show-keys", "-s", help="Show full API keys (not masked)"),
-    copy: Optional[str] = typer.Option(None, "--copy", "-c", help="Copy a key by name (e.g. client-api) to clipboard"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    show_keys: bool = typer.Option(
+        False, "--show-keys", "-s", help="Show full API keys (not masked)"
+    ),
+    copy: str | None = typer.Option(
+        None, "--copy", "-c", help="Copy a key by name (e.g. client-api) to clipboard"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List API keys for a project."""
@@ -73,12 +81,15 @@ def list_keys(
         raise typer.Exit(1)
 
     try:
-        result = client.post("system/api/search-key", {
-            "filters": {"project_id": project_id},
-            "sorters": ["name", 1],
-            "page": 1,
-            "page_size": 50,
-        })
+        result = client.post(
+            "system/api/search-key",
+            {
+                "filters": {"project_id": project_id},
+                "sorters": ["name", 1],
+                "page": 1,
+                "page_size": 50,
+            },
+        )
     except SystemExit:
         # MachinaClient raises SystemExit on HTTP/connection errors (detail on stderr).
         if json_output:
@@ -90,15 +101,19 @@ def list_keys(
 
     if json_output:
         # Masked by default; full keys only with --show-keys (matches table output).
-        print(json.dumps([
-            {
-                "name": k.get("name", ""),
-                "id": k.get("_id", ""),
-                "key": k.get("key", "") if show_keys else _mask_key(k.get("key", "")),
-                "masked": not show_keys,
-            }
-            for k in keys
-        ]))
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": k.get("name", ""),
+                        "id": k.get("_id", ""),
+                        "key": k.get("key", "") if show_keys else _mask_key(k.get("key", "")),
+                        "masked": not show_keys,
+                    }
+                    for k in keys
+                ]
+            )
+        )
         return
 
     if not keys:
@@ -114,12 +129,15 @@ def list_keys(
         key_value = target.get("key", "")
         try:
             import subprocess
+
             subprocess.run(["pbcopy"], input=key_value.encode(), check=True)
             console.print(f"[green]Copied '{copy}' key to clipboard.[/green]")
         except Exception:
             # Fallback: just print the key for manual copy
             console.print(f"\n  {key_value}\n")
-            console.print("[dim]Tip: pipe to clipboard with[/dim] machina credentials list --copy {copy} | pbcopy")
+            console.print(
+                "[dim]Tip: pipe to clipboard with[/dim] machina credentials list --copy {copy} | pbcopy"
+            )
         return
 
     table = Table(title="API Keys")
@@ -144,7 +162,9 @@ def list_keys(
 
     if not show_keys:
         console.print()
-        console.print("  [dim]Use[/dim] --show-keys [dim]to reveal full keys, or[/dim] --copy client-api [dim]to copy to clipboard[/dim]")
+        console.print(
+            "  [dim]Use[/dim] --show-keys [dim]to reveal full keys, or[/dim] --copy client-api [dim]to copy to clipboard[/dim]"
+        )
 
 
 @app.command()

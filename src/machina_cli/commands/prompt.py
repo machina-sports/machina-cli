@@ -1,11 +1,9 @@
 """Prompt management commands."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
 
@@ -15,24 +13,28 @@ console = Console()
 
 @app.command("list")
 def list_prompts(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     page: int = typer.Option(1, "--page", help="Page number"),
     page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List prompts in the current project."""
     client = ProjectClient(project_id)
-    result = client.post("prompt/search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["name", 1],
-    })
+    result = client.post(
+        "prompt/search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["name", 1],
+        },
+    )
 
     items = result.get("data", [])
 
     if json_output:
         import json
+
         console.print_json(json.dumps(items, default=str))
         return
 
@@ -67,7 +69,7 @@ def list_prompts(
 @app.command("get")
 def get_prompt(
     name: str = typer.Argument(..., help="Prompt name"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Get prompt details by name."""
@@ -78,20 +80,23 @@ def get_prompt(
 
     if json_output:
         import json
+
         console.print_json(json.dumps(data, default=str))
         return
 
     item = data if isinstance(data, dict) else {}
 
     # Header
-    console.print(Panel.fit(
-        f"[bold]Name:[/bold] {item.get('name', 'N/A')}\n"
-        f"[bold]Model:[/bold] {item.get('model', item.get('llm_model', 'N/A'))}\n"
-        f"[bold]Status:[/bold] {item.get('status', 'N/A')}\n"
-        f"[bold]ID:[/bold] {item.get('_id', 'N/A')}",
-        title="Prompt",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Name:[/bold] {item.get('name', 'N/A')}\n"
+            f"[bold]Model:[/bold] {item.get('model', item.get('llm_model', 'N/A'))}\n"
+            f"[bold]Status:[/bold] {item.get('status', 'N/A')}\n"
+            f"[bold]ID:[/bold] {item.get('_id', 'N/A')}",
+            title="Prompt",
+            border_style="#FF5C1F",
+        )
+    )
 
     # Show prompt content if available
     content = item.get("prompt", item.get("system_prompt", item.get("content", "")))

@@ -10,7 +10,6 @@ Authentication requires both:
 
 import mimetypes
 import os
-from typing import Optional
 
 import httpx
 from rich.console import Console
@@ -55,8 +54,9 @@ def _get_project_session(project_id: str) -> dict:
     stored = get_credential(f"project_token_{project_id}")
     if stored:
         # Decode JWT to get the api URL (without verification)
-        import json
         import base64
+        import json
+
         try:
             payload_b64 = stored.split(".")[1]
             # Add padding
@@ -65,6 +65,7 @@ def _get_project_session(project_id: str) -> dict:
 
             # Check if expired
             import time
+
             if payload.get("exp", 0) > time.time():
                 result = {"token": stored, "api_url": payload.get("api", "")}
                 _project_cache[project_id] = result
@@ -87,8 +88,9 @@ def _get_project_session(project_id: str) -> dict:
         raise SystemExit(1)
 
     # Decode JWT to get the Client API URL
-    import json
     import base64
+    import json
+
     try:
         payload_b64 = token.split(".")[1]
         payload_b64 += "=" * (4 - len(payload_b64) % 4)
@@ -112,7 +114,7 @@ def _get_project_session(project_id: str) -> dict:
 class ProjectClient:
     """HTTP client for per-project Client API resources."""
 
-    def __init__(self, project_id: Optional[str] = None):
+    def __init__(self, project_id: str | None = None):
         self.project_id = project_id or get_config("default_project_id")
 
         if not self.project_id:
@@ -155,7 +157,9 @@ class ProjectClient:
             _project_cache.pop(self.project_id, None)
             _clear_credential(f"project_token_{self.project_id}")
             console.print(f"[red]{error_msg or 'Project session expired.'}[/red]")
-            console.print("[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]")
+            console.print(
+                "[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]"
+            )
             raise SystemExit(1)
         if response.status_code == 403:
             console.print(f"[red]{error_msg or 'Permission denied.'}[/red]")
@@ -173,7 +177,7 @@ class ProjectClient:
 
         return data
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
+    def get(self, path: str, params: dict | None = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
@@ -183,7 +187,7 @@ class ProjectClient:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
             raise SystemExit(1)
 
-    def post(self, path: str, json_data: Optional[dict] = None) -> dict:
+    def post(self, path: str, json_data: dict | None = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
@@ -193,11 +197,11 @@ class ProjectClient:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
             raise SystemExit(1)
 
-    def post_file(self, path: str, file_path: str, data: dict = None) -> dict:
+    def post_file(self, path: str, file_path: str, data: dict | None = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
         mime_type, _ = mimetypes.guess_type(file_path)
-        mime_type = mime_type or 'application/octet-stream'
-        
+        mime_type = mime_type or "application/octet-stream"
+
         try:
             with httpx.Client(timeout=60.0) as client:
                 with open(file_path, "rb") as f:

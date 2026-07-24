@@ -7,7 +7,6 @@ MCP endpoint is that base plus a fixed path.
 """
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -32,7 +31,7 @@ _MCP_TRANSPORT = "sse"
 _MCP_AUTH_HEADER = "X-Api-Token"
 
 
-def _probe(mcp_url: str, auth: Optional[tuple] = None) -> bool:
+def _probe(mcp_url: str, auth: tuple | None = None) -> bool:
     """Best-effort reachability check for the MCP SSE endpoint.
 
     Opens the SSE stream and accepts only a 200 with an event-stream content type.
@@ -50,7 +49,7 @@ def _probe(mcp_url: str, auth: Optional[tuple] = None) -> bool:
     if header_name and token:
         headers[header_name] = token
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=5.0) as client:  # noqa: SIM117 — separate contexts keep the teardown order explicit
             with client.stream("GET", mcp_url, headers=headers) as resp:
                 content_type = resp.headers.get("content-type", "")
                 return resp.status_code == 200 and "event-stream" in content_type
@@ -60,7 +59,7 @@ def _probe(mcp_url: str, auth: Optional[tuple] = None) -> bool:
 
 @app.command()
 def url(
-    project_id: Optional[str] = typer.Argument(
+    project_id: str | None = typer.Argument(
         None, help="Project ID (defaults to the selected project)"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),

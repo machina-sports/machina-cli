@@ -10,7 +10,6 @@ import io
 import json as json_lib
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -37,7 +36,9 @@ SELF_HEAL_AGENTS = (
 STALE_AFTER = timedelta(hours=24)
 
 
-def _apply_staleness(badge: str, color: str, detail: str, seen: str, now: Optional[datetime] = None) -> tuple:
+def _apply_staleness(
+    badge: str, color: str, detail: str, seen: str, now: datetime | None = None
+) -> tuple:
     """Overlay doc freshness on an edge/surface summary.
 
     A clean edge whose evidence is old is not "ok" — it is unverified. Downgrades
@@ -46,7 +47,7 @@ def _apply_staleness(badge: str, color: str, detail: str, seen: str, now: Option
     """
     try:
         dt = parsedate_to_datetime(seen)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return badge, color, detail
     if dt is None:
         return badge, color, detail
@@ -63,14 +64,24 @@ def _apply_staleness(badge: str, color: str, detail: str, seen: str, now: Option
     else:
         age_s = f"{max(age.seconds // 60, 1)}m"
     if age > STALE_AFTER:
-        return (f"{badge} (stale)", "yellow" if color == "green" else color, f"{detail} · seen {age_s} ago")
+        return (
+            f"{badge} (stale)",
+            "yellow" if color == "green" else color,
+            f"{detail} · seen {age_s} ago",
+        )
     return badge, color, f"{detail} · {age_s} ago"
 
 
 def _docs(client: ProjectClient, name: str, page_size: int = 12) -> list:
     r = client.post(
         "document/search",
-        {"compact": False, "filters": {"name": name}, "page": 1, "page_size": page_size, "sorters": ["updated", -1]},
+        {
+            "compact": False,
+            "filters": {"name": name},
+            "page": 1,
+            "page_size": page_size,
+            "sorters": ["updated", -1],
+        },
     )
     d = r.get("data")
     return (d.get("data") if isinstance(d, dict) else d) or []
@@ -101,9 +112,17 @@ def _edge_summary(edge: str, h: dict) -> tuple:
     if edge == "market<->team_urn":
         unresolved = h.get("linkable_unresolved")
         if unresolved and unresolved > 0:
-            return ("unlinked", "red", f"{unresolved} unresolved · {h.get('team_markets', 0)} named")
+            return (
+                "unlinked",
+                "red",
+                f"{unresolved} unresolved · {h.get('team_markets', 0)} named",
+            )
         lr = h.get("link_rate_pct")
-        return ("linked", "green", f"{lr}% linked" if lr is not None else f"{h.get('resolved', 0)} linked")
+        return (
+            "linked",
+            "green",
+            f"{lr}% linked" if lr is not None else f"{h.get('resolved', 0)} linked",
+        )
     rate = h.get("broken_rate_pct")
     if rate is not None:
         return ("degraded" if rate > 0 else "ok", "red" if rate > 0 else "green", f"{rate}%")
@@ -122,7 +141,9 @@ def _collect(project_id: str) -> dict:
             edges[e] = h
     surf_docs = _docs(client, "context_graph_surface_health", 1)
     surface = (surf_docs[0].get("value") or {}) if surf_docs else None
-    surface_seen = str(surf_docs[0].get("updated") or surf_docs[0].get("created") or "") if surf_docs else ""
+    surface_seen = (
+        str(surf_docs[0].get("updated") or surf_docs[0].get("created") or "") if surf_docs else ""
+    )
     agents = {}
     ar = client.post("agent/search", {"filters": {}, "page": 1, "page_size": 100})
     ad = ar.get("data")
@@ -160,13 +181,21 @@ def _render_one(name: str, pid: str, st: dict) -> None:
             continue
         alive = a["status"] == "active" and a["scheduled"] is False
         c = "green" if a["status"] == "active" else "dim"
-        note = "" if a["status"] != "active" else (f" · freq={a['freq']}" + ("" if alive else " · [red]scheduled=True (won't fire)[/]"))
+        note = (
+            ""
+            if a["status"] != "active"
+            else (
+                f" · freq={a['freq']}" + ("" if alive else " · [red]scheduled=True (won't fire)[/]")
+            )
+        )
         console.print(f"  agent [bold]{an:20}[/] [{c}]{a['status']}[/]{note} [dim]{a['last']}[/]")
 
 
 @app.command("status")
 def status(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    project_id: str | None = typer.Option(
+        None, "--project", "-p", help="Project ID (default: selected project)"
+    ),
     org: bool = typer.Option(False, "--org", help="Roll up across all projects in the org"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
@@ -174,7 +203,9 @@ def status(
     if not org:
         pid = project_id or get_config("default_project_id")
         if not pid:
-            console.print("[red]No project selected. Run `machina project use <id>` or pass --project.[/red]")
+            console.print(
+                "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
+            )
             raise typer.Exit(1)
         st = _collect(pid)
         if json_output:
@@ -185,7 +216,9 @@ def status(
 
     # --org: iterate the org's projects
     core = MachinaClient()
-    res = core.post("user/projects/search", {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]})
+    res = core.post(
+        "user/projects/search", {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]}
+    )
     projects = res.get("data", []) or []
     rows, skipped = [], 0
     for p in projects:
@@ -199,7 +232,7 @@ def status(
             # corrupts --json and clutters the table) and skip cleanly.
             with contextlib.redirect_stderr(io.StringIO()):
                 st = _collect(pid)
-        except (SystemExit, Exception):  # noqa: BLE001
+        except (SystemExit, Exception):
             skipped += 1
             continue
         if not st["edges"] and not st["surface"] and not st["agents"]:
@@ -207,7 +240,12 @@ def status(
         rows.append((pname, pid, st))
 
     if json_output:
-        console.print_json(json_lib.dumps({"projects": [{"name": n, "id": i, **s} for n, i, s in rows], "skipped": skipped}, default=str))
+        console.print_json(
+            json_lib.dumps(
+                {"projects": [{"name": n, "id": i, **s} for n, i, s in rows], "skipped": skipped},
+                default=str,
+            )
+        )
         return
 
     if not rows:
@@ -225,10 +263,20 @@ def status(
         if s:
             v = s.get("verdict", "?")
             surf = f"[{'green' if v == 'ok' else 'yellow' if v == 'low_traffic' else 'red'}]{v}[/]"
-        beat = st["agents"].get("surface-watch-beat") or st["agents"].get("loop-beat") or st["agents"].get("context-verify-beat")
+        beat = (
+            st["agents"].get("surface-watch-beat")
+            or st["agents"].get("loop-beat")
+            or st["agents"].get("context-verify-beat")
+        )
         if beat:
             live = beat["status"] == "active" and beat["scheduled"] is False
-            beat_s = "[green]live[/]" if live else ("[red]active/scheduled=True[/]" if beat["status"] == "active" else "[dim]off[/]")
+            beat_s = (
+                "[green]live[/]"
+                if live
+                else (
+                    "[red]active/scheduled=True[/]" if beat["status"] == "active" else "[dim]off[/]"
+                )
+            )
         else:
             beat_s = "[dim]none[/]"
         table.add_row(pname, n_edges, surf, beat_s)
@@ -250,7 +298,7 @@ _DEGRADED = ("degraded:odds", "degraded:errors")
 def _parse_created(doc: dict):
     try:
         return parsedate_to_datetime(doc.get("created"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -275,7 +323,9 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
         ts = _parse_created(doc)
         if ts is None:
             continue
-        per_edge.setdefault(edge, []).append((ts, h.get(_DATA_EDGE_COUNT[edge]) or 0, v.get("healed") or {}))
+        per_edge.setdefault(edge, []).append(
+            (ts, h.get(_DATA_EDGE_COUNT[edge]) or 0, v.get("healed") or {})
+        )
     for edge, rows in per_edge.items():
         rows.sort(key=lambda r: r[0])
         prev_broken = 0
@@ -284,18 +334,38 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
             if broken > 0:
                 peak = max(peak, broken)
             if broken > 0 and prev_broken == 0:
-                events.append({"ts": ts, "edge": edge, "event": "detected", "detail": f"{broken} broken"})
+                events.append(
+                    {"ts": ts, "edge": edge, "event": "detected", "detail": f"{broken} broken"}
+                )
             if (healed.get("heal_count") or 0) > 0:
                 backlog = healed.get("backlog") or 0
                 extra = f" (+{backlog} queued)" if backlog else ""
-                events.append({"ts": ts, "edge": edge, "event": "heal",
-                               "detail": f"re-research dispatched for {healed['heal_count']} fixture(s){extra}"})
+                events.append(
+                    {
+                        "ts": ts,
+                        "edge": edge,
+                        "event": "heal",
+                        "detail": f"re-research dispatched for {healed['heal_count']} fixture(s){extra}",
+                    }
+                )
             if healed.get("budget_exceeded"):
-                events.append({"ts": ts, "edge": edge, "event": "heal-paused",
-                               "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human"})
+                events.append(
+                    {
+                        "ts": ts,
+                        "edge": edge,
+                        "event": "heal-paused",
+                        "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human",
+                    }
+                )
             if broken == 0 and prev_broken > 0:
-                events.append({"ts": ts, "edge": edge, "event": "recovered",
-                               "detail": f"back to 0 broken (incident peaked at {peak})"})
+                events.append(
+                    {
+                        "ts": ts,
+                        "edge": edge,
+                        "event": "recovered",
+                        "detail": f"back to 0 broken (incident peaked at {peak})",
+                    }
+                )
                 peak = 0
             prev_broken = broken
 
@@ -311,17 +381,37 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
     prev_v = None
     for ts, verdict, healed in srows:
         if verdict in _DEGRADED and verdict != prev_v:
-            events.append({"ts": ts, "edge": "surface<->users", "event": "detected", "detail": verdict})
+            events.append(
+                {"ts": ts, "edge": "surface<->users", "event": "detected", "detail": verdict}
+            )
         heal_items = healed.get("healed") if isinstance(healed, dict) else None
         if heal_items:
-            events.append({"ts": ts, "edge": "surface<->users", "event": "heal",
-                           "detail": f"odds refresh re-triggered ({len(heal_items)} season(s))"})
+            events.append(
+                {
+                    "ts": ts,
+                    "edge": "surface<->users",
+                    "event": "heal",
+                    "detail": f"odds refresh re-triggered ({len(heal_items)} season(s))",
+                }
+            )
         if isinstance(healed, dict) and healed.get("budget_exceeded"):
-            events.append({"ts": ts, "edge": "surface<->users", "event": "heal-paused",
-                           "detail": "retry budget exceeded — needs a human"})
+            events.append(
+                {
+                    "ts": ts,
+                    "edge": "surface<->users",
+                    "event": "heal-paused",
+                    "detail": "retry budget exceeded — needs a human",
+                }
+            )
         if verdict not in _DEGRADED and prev_v in _DEGRADED:
-            events.append({"ts": ts, "edge": "surface<->users", "event": "recovered",
-                           "detail": f"back to {verdict} (was {prev_v})"})
+            events.append(
+                {
+                    "ts": ts,
+                    "edge": "surface<->users",
+                    "event": "recovered",
+                    "detail": f"back to {verdict} (was {prev_v})",
+                }
+            )
         prev_v = verdict
 
     events.sort(key=lambda e: e["ts"])
@@ -341,7 +431,9 @@ _EVENT_STYLE = {"detected": "red", "heal": "cyan", "heal-paused": "bold red", "r
 
 @app.command("timeline")
 def timeline(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    project_id: str | None = typer.Option(
+        None, "--project", "-p", help="Project ID (default: selected project)"
+    ),
     org: bool = typer.Option(False, "--org", help="Merge events across all projects in the org"),
     days: int = typer.Option(30, "--days", "-d", help="How far back to look"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -353,7 +445,10 @@ def timeline(
     skipped = 0
     if org:
         core = MachinaClient()
-        res = core.post("user/projects/search", {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]})
+        res = core.post(
+            "user/projects/search",
+            {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]},
+        )
         for p in res.get("data", []) or []:
             pid = p.get("project_id") or p.get("id")
             pname = p.get("project_name") or p.get("name") or pid
@@ -363,12 +458,14 @@ def timeline(
                 with contextlib.redirect_stderr(io.StringIO()):
                     for ev in _collect_timeline(pid):
                         rows.append((pname, ev))
-            except (SystemExit, Exception):  # noqa: BLE001
+            except (SystemExit, Exception):
                 skipped += 1
     else:
         pid = project_id or get_config("default_project_id")
         if not pid:
-            console.print("[red]No project selected. Run `machina project use <id>` or pass --project.[/red]")
+            console.print(
+                "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
+            )
             raise typer.Exit(1)
         pname = get_config("default_project_name") or pid
         for ev in _collect_timeline(pid):
@@ -382,9 +479,19 @@ def timeline(
 
     if json_output:
         payload = {
-            "events": [{"project": n, "ts": e["ts"].isoformat(), "edge": e["edge"],
-                        "event": e["event"], "detail": e["detail"]} for n, e in rows],
-            "summary": counts, "window_days": days, "skipped": skipped,
+            "events": [
+                {
+                    "project": n,
+                    "ts": e["ts"].isoformat(),
+                    "edge": e["edge"],
+                    "event": e["event"],
+                    "detail": e["detail"],
+                }
+                for n, e in rows
+            ],
+            "summary": counts,
+            "window_days": days,
+            "skipped": skipped,
         }
         console.print_json(json_lib.dumps(payload))
         return

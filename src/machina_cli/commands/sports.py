@@ -10,7 +10,7 @@ introspectable registry backing the delegation.
 from __future__ import annotations
 
 import sys
-from typing import Iterable, List
+from collections.abc import Iterable
 
 import typer
 
@@ -25,7 +25,7 @@ def _invoke_sports_skills(argv: Iterable[str]) -> int:
         2. Subprocess to the ``sports-skills`` console script as a last-resort
            fallback if the package cannot be imported (e.g. stripped install).
     """
-    argv_list: List[str] = ["sports-skills", *argv]
+    argv_list: list[str] = ["sports-skills", *argv]
 
     try:
         from sports_skills import cli as sports_skills_cli  # type: ignore
@@ -36,6 +36,7 @@ def _invoke_sports_skills(argv: Iterable[str]) -> int:
         try:
             completed = subprocess.run(
                 argv_list,
+                check=False,
                 stdin=sys.stdin,
                 stdout=sys.stdout,
                 stderr=sys.stderr,

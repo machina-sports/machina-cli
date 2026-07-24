@@ -1,13 +1,14 @@
 """Skills-first command surface built on top of template plumbing."""
 
 from pathlib import Path
-from typing import Optional, List
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from machina_cli.commands import template, agent as agent_cmd, workflow as workflow_cmd
+from machina_cli.commands import agent as agent_cmd
+from machina_cli.commands import template
+from machina_cli.commands import workflow as workflow_cmd
 
 app = typer.Typer(help="Skills management")
 console = Console()
@@ -18,8 +19,9 @@ CONSTRUCTOR_LOCAL_DIR = "mkn-constructor"
 
 def _download_template_files(template_path: str, repo: str, branch: str):
     """Download local package files from GitHub without requiring project context."""
-    import httpx
     import urllib.parse
+
+    import httpx
 
     target_dir = Path.cwd() / Path(template_path).name
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +74,7 @@ def _ensure_constructor_installed(
 
 @app.command("list")
 def list_skills(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(template.DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(template.DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
     private: bool = typer.Option(False, "--private", help="Private repository"),
@@ -91,11 +93,16 @@ def list_skills(
 
 @app.command("install")
 def install_skill(
-    skill_path: str = typer.Argument(..., help="Path to the skill/template (e.g. skills/mkn-constructor or connectors/polymarket)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    skill_path: str = typer.Argument(
+        ...,
+        help="Path to the skill/template (e.g. skills/mkn-constructor or connectors/polymarket)",
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(template.DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(template.DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output raw JSON for agent ingestion"
+    ),
 ):
     """Install a skill/package from the registry."""
     _ensure_constructor_installed(repo=repo, branch=branch)
@@ -110,9 +117,13 @@ def install_skill(
 
 @app.command("push")
 def push_skill(
-    target_dir: str = typer.Argument(..., help="Path to local folder containing your custom skill/template"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
+    target_dir: str = typer.Argument(
+        ..., help="Path to local folder containing your custom skill/template"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output raw JSON for agent ingestion"
+    ),
 ):
     """Push a local skill/package to the Machina pod."""
     _ensure_constructor_installed()
@@ -127,35 +138,39 @@ def _load_skill_manifest(skill_name: str):
     import yaml
 
     candidates = [
-        Path.cwd() / skill_name / 'skill.yml',
-        Path.cwd() / 'skills' / skill_name / 'skill.yml',
-        Path.cwd() / f'{skill_name}.yml',
+        Path.cwd() / skill_name / "skill.yml",
+        Path.cwd() / "skills" / skill_name / "skill.yml",
+        Path.cwd() / f"{skill_name}.yml",
     ]
     for path in candidates:
         if path.exists():
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 data = yaml.safe_load(f) or {}
-            return path, data.get('skill', {})
+            return path, data.get("skill", {})
     return None, None
 
 
 @app.command("info")
 def skill_info(
-    skill_path: str = typer.Argument(..., help="Path to the skill/template (e.g. skills/mkn-constructor)"),
+    skill_path: str = typer.Argument(
+        ..., help="Path to the skill/template (e.g. skills/mkn-constructor)"
+    ),
 ):
     """Show skill metadata and manifest location when available."""
     _ensure_constructor_installed()
     manifest_path, skill = _load_skill_manifest(Path(skill_path).name)
     if manifest_path and skill:
-        console.print(Panel.fit(
-            f"[bold]Name:[/bold] {skill.get('name', 'N/A')}\n"
-            f"[bold]Title:[/bold] {skill.get('title', 'N/A')}\n"
-            f"[bold]Description:[/bold] {skill.get('description', 'N/A')}\n"
-            f"[bold]Version:[/bold] {skill.get('version', 'N/A')}\n"
-            f"[bold]Manifest:[/bold] {manifest_path}",
-            title='Skill Info',
-            border_style='#FF5C1F',
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold]Name:[/bold] {skill.get('name', 'N/A')}\n"
+                f"[bold]Title:[/bold] {skill.get('title', 'N/A')}\n"
+                f"[bold]Description:[/bold] {skill.get('description', 'N/A')}\n"
+                f"[bold]Version:[/bold] {skill.get('version', 'N/A')}\n"
+                f"[bold]Manifest:[/bold] {manifest_path}",
+                title="Skill Info",
+                border_style="#FF5C1F",
+            )
+        )
         return
 
     p = Path(skill_path)
@@ -168,9 +183,11 @@ def skill_info(
 @app.command("run")
 def run_skill(
     skill_name: str = typer.Argument(..., help="Installed skill name"),
-    params: Optional[List[str]] = typer.Argument(None, help="Parameters as key=value pairs"),
-    entrypoint: Optional[str] = typer.Option(None, "--entrypoint", "-e", help="Specific workflow or agent entrypoint name"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    params: list[str] | None = typer.Argument(None, help="Parameters as key=value pairs"),
+    entrypoint: str | None = typer.Option(
+        None, "--entrypoint", "-e", help="Specific workflow or agent entrypoint name"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     sync: bool = typer.Option(True, "--sync/--async", help="Sync (wait) or async (schedule)"),
     watch: bool = typer.Option(False, "--watch", "-w", help="Watch async execution progress"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -180,21 +197,25 @@ def run_skill(
     manifest_path, skill = _load_skill_manifest(skill_name)
     if not skill:
         console.print(f"[red]Skill manifest not found for:[/red] {skill_name}")
-        console.print("[dim]Expected a local skill.yml. Install or bootstrap the skill first.[/dim]")
+        console.print(
+            "[dim]Expected a local skill.yml. Install or bootstrap the skill first.[/dim]"
+        )
         raise typer.Exit(1)
 
-    workflows = skill.get('workflows', []) or []
-    agents = skill.get('agents', []) or []
+    workflows = skill.get("workflows", []) or []
+    agents = skill.get("agents", []) or []
     choices = []
     for wf in workflows:
-        if isinstance(wf, dict) and wf.get('name'):
-            choices.append(('workflow', wf.get('name')))
+        if isinstance(wf, dict) and wf.get("name"):
+            choices.append(("workflow", wf.get("name")))
     for ag in agents:
-        if isinstance(ag, dict) and ag.get('name'):
-            choices.append(('agent', ag.get('name')))
+        if isinstance(ag, dict) and ag.get("name"):
+            choices.append(("agent", ag.get("name")))
 
     if not choices:
-        console.print(f"[red]No runnable entrypoints found in skill:[/red] {skill.get('name', skill_name)}")
+        console.print(
+            f"[red]No runnable entrypoints found in skill:[/red] {skill.get('name', skill_name)}"
+        )
         raise typer.Exit(1)
 
     selected = None
@@ -219,7 +240,7 @@ def run_skill(
     console.print(f"[bold]Entrypoint:[/bold] {kind} → {name}")
     console.print(f"[dim]Manifest:[/dim] {manifest_path}")
 
-    if kind == 'workflow':
+    if kind == "workflow":
         return workflow_cmd.run_workflow(
             name=name,
             params=params,
@@ -241,8 +262,10 @@ def run_skill(
 
 @app.command("constructor")
 def constructor_bridge(
-    install: bool = typer.Option(True, "--install/--no-install", help="Install the constructor skill package first"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    install: bool = typer.Option(
+        True, "--install/--no-install", help="Install the constructor skill package first"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(template.DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(template.DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
 ):
@@ -250,10 +273,12 @@ def constructor_bridge(
     if install:
         _ensure_constructor_installed(repo=repo, branch=branch)
 
-    console.print(Panel.fit(
-        f"[bold]Constructor skill:[/bold] {CONSTRUCTOR_SKILL_PATH}\n"
-        "[bold]Purpose:[/bold] Build new skills, templates, and connectors in the canonical Machina format\n"
-        "[bold]Next action:[/bold] Read the installed SKILL.md and use the init/create/validate/install references as the authoring workflow",
-        title="mkn-constructor bridge",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Constructor skill:[/bold] {CONSTRUCTOR_SKILL_PATH}\n"
+            "[bold]Purpose:[/bold] Build new skills, templates, and connectors in the canonical Machina format\n"
+            "[bold]Next action:[/bold] Read the installed SKILL.md and use the init/create/validate/install references as the authoring workflow",
+            title="mkn-constructor bridge",
+            border_style="#FF5C1F",
+        )
+    )

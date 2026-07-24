@@ -12,9 +12,8 @@ import socket
 import threading
 import time
 import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional
-from urllib.parse import urlencode, urlparse, parse_qs
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from rich.console import Console
 
@@ -132,10 +131,9 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         """Suppress default HTTP server logging."""
-        pass
 
 
-def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
+def browser_login(session_url: str, timeout: int = 120) -> str | None:
     """
     Run the browser-based auth flow.
 
@@ -186,7 +184,9 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
             console.print("  [yellow]Browser authentication timed out.[/yellow]")
             console.print()
             console.print("  [dim]This can happen if:[/dim]")
-            console.print("  [dim]  • You were already logged in and got redirected to Studio[/dim]")
+            console.print(
+                "  [dim]  • You were already logged in and got redirected to Studio[/dim]"
+            )
             console.print("  [dim]  • The session server doesn't support CLI auth yet[/dim]")
             console.print()
             console.print("  [bold]Alternative ways to authenticate:[/bold]")
@@ -202,10 +202,12 @@ def browser_login(session_url: str, timeout: int = 120) -> Optional[str]:
         if _auth_result.get("status"):
             return _auth_result["token"]
         else:
-            error = _auth_result.get('error', 'Unknown error')
+            error = _auth_result.get("error", "Unknown error")
             console.print(f"  [red]Authentication failed: {error}[/red]")
             console.print()
-            console.print("  [dim]Try:[/dim] [bold]machina login --api-key <key>[/bold] [dim]or[/dim] [bold]machina login --with-credentials[/bold]")
+            console.print(
+                "  [dim]Try:[/dim] [bold]machina login --api-key <key>[/bold] [dim]or[/dim] [bold]machina login --with-credentials[/bold]"
+            )
             return None
 
     finally:

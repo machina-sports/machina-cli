@@ -66,7 +66,9 @@ def _show_release_notes(version: str):
                     for line in lines:
                         console.print(f"  [dim]{line}[/dim]")
                     if len(body.split("\n")) > 15:
-                        console.print(f"  [dim]... (see full notes at github.com/{REPO}/releases/tag/v{version})[/dim]")
+                        console.print(
+                            f"  [dim]... (see full notes at github.com/{REPO}/releases/tag/v{version})[/dim]"
+                        )
                     console.print()
     except Exception:
         pass
@@ -84,7 +86,9 @@ def do_update(force: bool = False) -> bool:
         latest = get_latest_version()
 
     if not latest:
-        console.print("  [yellow]Could not check for updates. Check your internet connection.[/yellow]")
+        console.print(
+            "  [yellow]Could not check for updates. Check your internet connection.[/yellow]"
+        )
         return False
 
     console.print(f"  [dim]Latest version:[/dim]  [bold]v{latest}[/bold]")
@@ -128,7 +132,7 @@ def do_update(force: bool = False) -> bool:
                 return False
 
             # Write to temp file
-            tmp = tempfile.NamedTemporaryFile(delete=False, prefix="machina-update-")
+            tmp = tempfile.NamedTemporaryFile(delete=False, prefix="machina-update-")  # noqa: SIM115 — handle is passed across the download/verify boundary
             tmp.write(resp.content)
             tmp.close()
             os.chmod(tmp.name, 0o755)
@@ -140,7 +144,9 @@ def do_update(force: bool = False) -> bool:
                 console.print(f"  [dim]Need sudo to install to {target.parent}[/dim]")
                 result = subprocess.run(
                     ["sudo", "mv", tmp.name, str(target)],
-                    capture_output=True, text=True,
+                    check=False,
+                    capture_output=True,
+                    text=True,
                 )
                 if result.returncode != 0:
                     console.print(f"  [red]Failed: {result.stderr.strip()}[/red]")
@@ -155,7 +161,10 @@ def do_update(force: bool = False) -> bool:
         try:
             verify = subprocess.run(
                 [str(target), "version"],
-                capture_output=True, text=True, timeout=5,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if verify.returncode == 0:
                 console.print(f"  {verify.stdout.strip()}")

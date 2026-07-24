@@ -3,12 +3,11 @@
 import json as json_lib
 import sys
 import time
-from typing import Optional, List
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
 
@@ -18,19 +17,22 @@ console = Console()
 
 @app.command("list")
 def list_workflows(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     page: int = typer.Option(1, "--page", help="Page number"),
     page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List workflows in the current project."""
     client = ProjectClient(project_id)
-    result = client.post("workflow/search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["name", 1],
-    })
+    result = client.post(
+        "workflow/search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["name", 1],
+        },
+    )
 
     workflows = result.get("data", [])
 
@@ -69,7 +71,7 @@ def list_workflows(
 @app.command("get")
 def get_workflow(
     name: str = typer.Argument(..., help="Workflow name or slug"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Get workflow details by name."""
@@ -84,23 +86,27 @@ def get_workflow(
 
     wf = data if not isinstance(data, list) else data[0] if data else {}
 
-    console.print(Panel.fit(
-        f"[bold]Name:[/bold] {wf.get('name', 'N/A')}\n"
-        f"[bold]Slug:[/bold] {wf.get('slug', 'N/A')}\n"
-        f"[bold]Status:[/bold] {wf.get('status', 'N/A')}\n"
-        f"[bold]ID:[/bold] {wf.get('_id', 'N/A')}\n"
-        f"[bold]Description:[/bold] {wf.get('description', 'N/A')}",
-        title="Workflow",
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Name:[/bold] {wf.get('name', 'N/A')}\n"
+            f"[bold]Slug:[/bold] {wf.get('slug', 'N/A')}\n"
+            f"[bold]Status:[/bold] {wf.get('status', 'N/A')}\n"
+            f"[bold]ID:[/bold] {wf.get('_id', 'N/A')}\n"
+            f"[bold]Description:[/bold] {wf.get('description', 'N/A')}",
+            title="Workflow",
+            border_style="#FF5C1F",
+        )
+    )
 
 
 @app.command("run")
 def run_workflow(
     name: str = typer.Argument(..., help="Workflow name"),
-    params: Optional[List[str]] = typer.Argument(None, help="Parameters as key=value pairs"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
-    sync: bool = typer.Option(True, "--sync/--async", "-s/-a", help="Sync (wait) or async (schedule)"),
+    params: list[str] | None = typer.Argument(None, help="Parameters as key=value pairs"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    sync: bool = typer.Option(
+        True, "--sync/--async", "-s/-a", help="Sync (wait) or async (schedule)"
+    ),
     watch: bool = typer.Option(False, "--watch", "-w", help="Watch async execution progress"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
@@ -136,7 +142,9 @@ def run_workflow(
                     value = int(value)
                 context[key] = value
             else:
-                console.print(f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]")
+                console.print(
+                    f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]"
+                )
 
     # Interactive mode: if no params and there are available inputs, show them
     if not params and available_inputs and sys.stdin.isatty():
@@ -153,7 +161,7 @@ def run_workflow(
         for key, default_expr in available_inputs.items():
             # Extract a readable default hint from the expression
             hint = ""
-            if isinstance(default_expr, str):
+            if isinstance(default_expr, str):  # noqa: SIM102 — nested ifs mirror the docs' decision tree
                 # e.g. "$.get('limit', 50)" → default: 50
                 if "," in default_expr and "$.get(" in default_expr:
                     parts = default_expr.split(",", 1)
@@ -203,30 +211,44 @@ def run_workflow(
 
     workflow_run_id = data.get("workflow_run_id", data.get("_id", ""))
     status = data.get("status", "scheduled" if not sync else "executed")
-    color = "green" if status in ("executed", "completed") else "yellow" if status == "scheduled" else "red"
+    color = (
+        "green"
+        if status in ("executed", "completed")
+        else "yellow"
+        if status == "scheduled"
+        else "red"
+    )
 
-    console.print(Panel(
-        f"[bold]Status:[/bold] [{color}]{status}[/{color}]\n"
-        f"[bold]Workflow Run ID:[/bold] {workflow_run_id}",
-        title="Workflow " + ("Complete" if sync else "Scheduled"),
-        border_style="#FF5C1F",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Status:[/bold] [{color}]{status}[/{color}]\n"
+            f"[bold]Workflow Run ID:[/bold] {workflow_run_id}",
+            title="Workflow " + ("Complete" if sync else "Scheduled"),
+            border_style="#FF5C1F",
+        )
+    )
 
     # Show response for sync execution
     if sync:
         # Filter out internal fields, show the workflow output
-        output = {k: v for k, v in data.items()
-                  if k not in ("workflow_run_id", "_id", "status", "message")}
+        output = {
+            k: v
+            for k, v in data.items()
+            if k not in ("workflow_run_id", "_id", "status", "message")
+        }
         if output:
             formatted = json_lib.dumps(output, indent=2, default=str, ensure_ascii=False)
             if len(formatted) > 3000:
                 formatted = formatted[:3000] + "\n... (use --json for full output)"
             from rich.syntax import Syntax
+
             console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Output"))
 
     # Async: show tracking hint
     if not sync and workflow_run_id:
-        console.print(f"  [dim]Track with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]")
+        console.print(
+            f"  [dim]Track with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]"
+        )
 
     # Watch mode for async
     if watch and not sync and workflow_run_id:
@@ -244,21 +266,30 @@ def run_workflow(
                     if run_status in ("executed", "completed", "failed"):
                         console.print()
                         run_color = "green" if run_status in ("executed", "completed") else "red"
-                        console.print(Panel(
-                            f"[bold]Status:[/bold] [{run_color}]{run_status}[/{run_color}]",
-                            title="Execution Complete",
-                            border_style="#FF5C1F",
-                        ))
+                        console.print(
+                            Panel(
+                                f"[bold]Status:[/bold] [{run_color}]{run_status}[/{run_color}]",
+                                title="Execution Complete",
+                                border_style="#FF5C1F",
+                            )
+                        )
 
                         output = run_data.get("workflow_output", {})
                         if output:
-                            formatted = json_lib.dumps(output, indent=2, default=str, ensure_ascii=False)
+                            formatted = json_lib.dumps(
+                                output, indent=2, default=str, ensure_ascii=False
+                            )
                             from rich.syntax import Syntax
-                            console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Output"))
+
+                            console.print(
+                                Panel(Syntax(formatted, "json", theme="monokai"), title="Output")
+                            )
                         break
                 except Exception:
                     pass
 
             if elapsed >= 300:
                 console.print("  [yellow]Timed out. Workflow may still be running.[/yellow]")
-                console.print(f"  [dim]Check with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]")
+                console.print(
+                    f"  [dim]Check with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]"
+                )

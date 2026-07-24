@@ -122,8 +122,12 @@ def _watch(
 @app.command()
 def run(
     prompt: str = typer.Argument(..., help="The task / first user message for the loop"),
-    persona: str = typer.Option(DEFAULT_PERSONA, "--persona", "-p", help="Reasoning persona (prompt) the runner uses"),
-    watch: bool = typer.Option(False, "--watch", "-w", help="Stream turns until the session finishes"),
+    persona: str = typer.Option(
+        DEFAULT_PERSONA, "--persona", "-p", help="Reasoning persona (prompt) the runner uses"
+    ),
+    watch: bool = typer.Option(
+        False, "--watch", "-w", help="Stream turns until the session finishes"
+    ),
 ):
     """Start a new loop session."""
     session_id = LoopClient().start(prompt, persona_agent=persona)

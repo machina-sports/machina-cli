@@ -1,7 +1,6 @@
 """Deployment management commands."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -16,7 +15,7 @@ console = Console()
 
 @app.command("start")
 def deploy_start(
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
+    org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
     version: str = typer.Option("beta", "--version", "-v", help="Client API version"),
 ):
     """Deploy the Client API for an organization."""
@@ -30,9 +29,12 @@ def deploy_start(
 
     console.print(f"Deploying Client API for organization {org_id}...")
 
-    result = client.post(f"organization/{org_id}/deploy-client-api", {
-        "client_api_version": version,
-    })
+    result = client.post(
+        f"organization/{org_id}/deploy-client-api",
+        {
+            "client_api_version": version,
+        },
+    )
 
     console.print("[green]Deployment started successfully.[/green]")
     data = result.get("data", {})
@@ -42,7 +44,7 @@ def deploy_start(
 
 @app.command()
 def status(
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
+    org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Check deployment status."""
@@ -71,16 +73,18 @@ def status(
         print(json.dumps({"organization": org_id, "status": data.get("status", "unknown")}))
         return
 
-    console.print(Panel.fit(
-        f"[bold]Organization:[/bold] {org_id}\n"
-        f"[bold]Status:[/bold] {data.get('status', 'unknown')}",
-        title="Deployment Status",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Organization:[/bold] {org_id}\n"
+            f"[bold]Status:[/bold] {data.get('status', 'unknown')}",
+            title="Deployment Status",
+        )
+    )
 
 
 @app.command()
 def restart(
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
+    org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
 ):
     """Restart the Client API deployment."""
     client = MachinaClient()

@@ -9,7 +9,6 @@ Studio, MCP) shares the same logic — the CLI is deliberately thin.
 
 import getpass
 import json as json_lib
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -27,7 +26,13 @@ def _requests(client: ProjectClient, show_all: bool) -> list:
         filters["value.status"] = "pending"
     r = client.post(
         "document/search",
-        {"compact": False, "filters": filters, "page": 1, "page_size": 50, "sorters": ["created", -1]},
+        {
+            "compact": False,
+            "filters": filters,
+            "page": 1,
+            "page_size": 50,
+            "sorters": ["created", -1],
+        },
     )
     d = r.get("data")
     return (d.get("data") if isinstance(d, dict) else d) or []
@@ -35,7 +40,9 @@ def _requests(client: ProjectClient, show_all: bool) -> list:
 
 @app.command("list")
 def list_approvals(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    project_id: str | None = typer.Option(
+        None, "--project", "-p", help="Project ID (default: selected project)"
+    ),
     show_all: bool = typer.Option(False, "--all", "-a", help="Include already-resolved requests"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
@@ -44,17 +51,26 @@ def list_approvals(
     rows = _requests(client, show_all)
 
     if json_output:
-        payload = [{"request_id": (r.get("value") or {}).get("request_id"),
-                    "title": (r.get("value") or {}).get("title"),
-                    "status": (r.get("value") or {}).get("status"),
-                    "action_workflow": ((r.get("value") or {}).get("action") or {}).get("workflow"),
-                    "requested_at": (r.get("value") or {}).get("requested_at"),
-                    "created": str(r.get("created") or "")} for r in rows]
+        payload = [
+            {
+                "request_id": (r.get("value") or {}).get("request_id"),
+                "title": (r.get("value") or {}).get("title"),
+                "status": (r.get("value") or {}).get("status"),
+                "action_workflow": ((r.get("value") or {}).get("action") or {}).get("workflow"),
+                "requested_at": (r.get("value") or {}).get("requested_at"),
+                "created": str(r.get("created") or ""),
+            }
+            for r in rows
+        ]
         console.print_json(json_lib.dumps(payload, default=str))
         return
 
     if not rows:
-        console.print("[green]No pending approvals.[/green]" if not show_all else "[yellow]No approval requests found.[/yellow]")
+        console.print(
+            "[green]No pending approvals.[/green]"
+            if not show_all
+            else "[yellow]No approval requests found.[/yellow]"
+        )
         return
     table = Table(title="Approval requests" + ("" if show_all else " — pending"))
     table.add_column("Request", style="bold")
@@ -66,18 +82,22 @@ def list_approvals(
         v = r.get("value") or {}
         status = v.get("status", "?")
         color = {"pending": "yellow", "approved": "green", "rejected": "red"}.get(status, "dim")
-        table.add_row(v.get("request_id", "?"), v.get("title", ""),
-                      f"[{color}]{status}[/]", (v.get("action") or {}).get("workflow") or "—",
-                      str(v.get("requested_at") or r.get("created") or "")[:16])
+        table.add_row(
+            v.get("request_id", "?"),
+            v.get("title", ""),
+            f"[{color}]{status}[/]",
+            (v.get("action") or {}).get("workflow") or "—",
+            str(v.get("requested_at") or r.get("created") or "")[:16],
+        )
     console.print(table)
     console.print("  [dim]Resolve with[/] [bold]machina approvals approve|reject <request-id>[/]")
 
 
-def _resolve(request_id: str, decision: str, project_id: Optional[str], json_output: bool) -> None:
+def _resolve(request_id: str, decision: str, project_id: str | None, json_output: bool) -> None:
     client = ProjectClient(project_id)
     try:
         resolver = getpass.getuser()
-    except Exception:  # noqa: BLE001
+    except Exception:
         resolver = "cli"
     result = client.post(
         "workflow/execute/machina-approval-resolve",
@@ -104,8 +124,12 @@ def _resolve(request_id: str, decision: str, project_id: Optional[str], json_out
 
 @app.command("approve")
 def approve(
-    request_id: str = typer.Argument(..., help="The approval request id (from `approvals list` or Slack)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    request_id: str = typer.Argument(
+        ..., help="The approval request id (from `approvals list` or Slack)"
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project", "-p", help="Project ID (default: selected project)"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Approve a request — the stored action workflow runs in-pod."""
@@ -114,8 +138,12 @@ def approve(
 
 @app.command("reject")
 def reject(
-    request_id: str = typer.Argument(..., help="The approval request id (from `approvals list` or Slack)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID (default: selected project)"),
+    request_id: str = typer.Argument(
+        ..., help="The approval request id (from `approvals list` or Slack)"
+    ),
+    project_id: str | None = typer.Option(
+        None, "--project", "-p", help="Project ID (default: selected project)"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Reject a request — recorded, nothing runs."""

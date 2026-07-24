@@ -1,11 +1,9 @@
 """Project management commands."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
@@ -22,18 +20,22 @@ def list_projects(
 ):
     """List your projects."""
     client = MachinaClient()
-    result = client.post("user/projects/search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["name", 1],
-    })
+    result = client.post(
+        "user/projects/search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["name", 1],
+        },
+    )
 
     projects = result.get("data", [])
     default_project = get_config("default_project_id")
 
     if json_output:
         import json
+
         console.print_json(json.dumps(projects, default=str))
         return
 
@@ -72,8 +74,12 @@ def list_projects(
 @app.command()
 def create(
     name: str = typer.Argument(..., help="Project name"),
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID (uses default if omitted)"),
-    slug: Optional[str] = typer.Option(None, "--slug", "-s", help="Project slug (auto-generated if omitted)"),
+    org_id: str | None = typer.Option(
+        None, "--org", "-o", help="Organization ID (uses default if omitted)"
+    ),
+    slug: str | None = typer.Option(
+        None, "--slug", "-s", help="Project slug (auto-generated if omitted)"
+    ),
 ):
     """Create a new project."""
     client = MachinaClient()
@@ -81,19 +87,24 @@ def create(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print("[red]No organization specified. Use --org or set default with `machina org use`.[/red]")
+        console.print(
+            "[red]No organization specified. Use --org or set default with `machina org use`.[/red]"
+        )
         raise typer.Exit(1)
 
     if not slug:
         slug_result = client.post("project/generate-slug", {"name": name})
         slug = slug_result.get("data", {}).get("slug", name.lower().replace(" ", "-"))
 
-    result = client.post("project", {
-        "name": name,
-        "slug": slug,
-        "organization_id": org_id,
-        "status": "active",
-    })
+    result = client.post(
+        "project",
+        {
+            "name": name,
+            "slug": slug,
+            "organization_id": org_id,
+            "status": "active",
+        },
+    )
 
     proj_id = result.get("data", {}).get("id", "")
     console.print(f"[green]Project created:[/green] {name} (ID: {proj_id})")
@@ -113,9 +124,15 @@ def use(
     # Try to resolve project name for display and shell prompt
     try:
         client = MachinaClient()
-        result = client.post("user/projects/search", {
-            "filters": {}, "page": 1, "page_size": 100, "sorters": ["name", 1],
-        })
+        result = client.post(
+            "user/projects/search",
+            {
+                "filters": {},
+                "page": 1,
+                "page_size": 100,
+                "sorters": ["name", 1],
+            },
+        )
         for proj in result.get("data", []):
             if proj.get("project_id") == project_id:
                 name = proj.get("project_name", "")
@@ -131,7 +148,7 @@ def use(
 
 @app.command()
 def status(
-    org_id: Optional[str] = typer.Option(None, "--org", "-o", help="Organization ID"),
+    org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
 ):
     """Show project deployment status."""
     client = MachinaClient()
@@ -139,17 +156,23 @@ def status(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print("[red]No organization specified. Use --org or set default with `machina org use`.[/red]")
+        console.print(
+            "[red]No organization specified. Use --org or set default with `machina org use`.[/red]"
+        )
         raise typer.Exit(1)
 
     result = client.get(f"organization/{org_id}/api-status")
     data = result.get("data", {})
 
     status_value = data.get("status", "unknown")
-    color = "green" if status_value == "online" else "red" if status_value == "offline" else "yellow"
+    color = (
+        "green" if status_value == "online" else "red" if status_value == "offline" else "yellow"
+    )
 
-    console.print(Panel.fit(
-        f"[bold]Status:[/bold] [{color}]{status_value}[/{color}]\n"
-        f"[bold]Organization:[/bold] {org_id}",
-        title="Deployment Status",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Status:[/bold] [{color}]{status_value}[/{color}]\n"
+            f"[bold]Organization:[/bold] {org_id}",
+            title="Deployment Status",
+        )
+    )

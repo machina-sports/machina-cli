@@ -1,7 +1,5 @@
 """HTTP client for Machina Core API."""
 
-from typing import Optional
-
 import httpx
 from rich.console import Console
 
@@ -15,7 +13,7 @@ TIMEOUT = 30.0
 class MachinaClient:
     """HTTP client that handles authentication and error formatting."""
 
-    def __init__(self, api_url: Optional[str] = None):
+    def __init__(self, api_url: str | None = None):
         self.api_url = (api_url or get_api_url()).rstrip("/")
 
     def _headers(self) -> dict:
@@ -107,7 +105,7 @@ class MachinaClient:
     def get(
         self,
         path: str,
-        params: Optional[dict] = None,
+        params: dict | None = None,
         allow_fallback: bool = True,
         quiet: bool = False,
     ) -> dict:
@@ -116,7 +114,7 @@ class MachinaClient:
     def post(
         self,
         path: str,
-        json_data: Optional[dict] = None,
+        json_data: dict | None = None,
         skip_auth: bool = False,
         allow_fallback: bool = True,
         quiet: bool = False,

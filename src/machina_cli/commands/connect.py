@@ -8,7 +8,6 @@ URL. The token is masked by default; pass --reveal (or --json --reveal) to emit 
 
 import json
 import re
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -33,7 +32,7 @@ def _safe_name(value: str) -> str:
     return cleaned or "machina"
 
 
-def _fail(message: str, json_output: bool, extra: Optional[dict] = None):
+def _fail(message: str, json_output: bool, extra: dict | None = None):
     """Emit an error (JSON envelope or console) and exit non-zero."""
     if json_output:
         print(json.dumps({"error": message, **(extra or {})}))
@@ -83,13 +82,13 @@ def _ensure_project_api_key(project_id: str, org_id: str, json_output: bool) -> 
 
 
 def run(
-    project_id: Optional[str],
+    project_id: str | None,
     json_output: bool,
     reveal: bool,
     probe: bool,
-    name: Optional[str],
+    name: str | None,
     mint: bool = False,
-    org: Optional[str] = None,
+    org: str | None = None,
 ):
     """Resolve and present a project's MCP connection bundle."""
     project_id = project_id or get_config("default_project_id")

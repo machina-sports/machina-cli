@@ -18,10 +18,7 @@ _SECRET_KEY = re.compile(r"(api[_-]?key|token|secret|password)", re.IGNORECASE)
 
 def _redact(config: dict) -> dict:
     """Mask secret-looking values so bulk config output never leaks credentials."""
-    return {
-        k: ("***redacted***" if v and _SECRET_KEY.search(k) else v)
-        for k, v in config.items()
-    }
+    return {k: ("***redacted***" if v and _SECRET_KEY.search(k) else v) for k, v in config.items()}
 
 
 @app.command("set")

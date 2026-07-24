@@ -79,9 +79,7 @@ def _should_show() -> bool:
         return False
     if any(a in ("--json", "-j") for a in sys.argv):
         return False
-    if "update" in sys.argv:
-        return False
-    return True
+    return "update" not in sys.argv
 
 
 def maybe_notify_update() -> None:

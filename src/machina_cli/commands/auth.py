@@ -1,7 +1,6 @@
 """Authentication commands: login, logout, whoami."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -54,9 +53,9 @@ def _handle_mfa_challenge(client: "MachinaClient", data: dict) -> str | None:
 
 
 def do_login(
-    api_key: Optional[str] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
+    api_key: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
     with_credentials: bool = False,
 ):
     """
@@ -161,16 +160,16 @@ def do_login(
 
 @app.command()
 def login(
-    api_key: Optional[str] = typer.Option(
+    api_key: str | None = typer.Option(
         None, "--api-key", "-k", help="Authenticate with an API key"
     ),
     with_credentials: bool = typer.Option(
         False, "--with-credentials", help="Use username/password instead of browser"
     ),
-    username: Optional[str] = typer.Option(
+    username: str | None = typer.Option(
         None, "--username", "-u", help="Username (requires --with-credentials)"
     ),
-    password: Optional[str] = typer.Option(
+    password: str | None = typer.Option(
         None, "--password", "-p", help="Password (requires --with-credentials)"
     ),
 ):

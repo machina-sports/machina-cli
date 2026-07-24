@@ -1,7 +1,6 @@
 """Template management commands."""
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -18,7 +17,7 @@ DEFAULT_BRANCH = "main"
 
 @app.command("list")
 def list_templates(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
     private: bool = typer.Option(False, "--private", help="Private repository"),
@@ -26,16 +25,20 @@ def list_templates(
 ):
     """List available templates from the template repository."""
     client = ProjectClient(project_id)
-    result = client.post("templates/directories/git", {
-        "repo_url": repo,
-        "branch": branch,
-        "private_repository": private,
-    })
+    result = client.post(
+        "templates/directories/git",
+        {
+            "repo_url": repo,
+            "branch": branch,
+            "private_repository": private,
+        },
+    )
 
     data = result.get("data", result)
 
     if json_output:
         import json
+
         console.print_json(json.dumps(data, default=str))
         return
 
@@ -70,13 +73,13 @@ def list_templates(
     top_level = set()
     for p in paths:
         parts = p.split("/")
-        if len(parts) >= 2:
-            top_level.add(parts[0])
-        elif len(parts) == 1 and parts[0]:
+        if len(parts) >= 2 or len(parts) == 1 and parts[0]:
             top_level.add(parts[0])
 
     # Build tree grouped by top-level
-    tree = Tree(f"[bold]Templates[/bold] [dim]({repo.split('/')[-2] if '/' in repo else repo})[/dim]")
+    tree = Tree(
+        f"[bold]Templates[/bold] [dim]({repo.split('/')[-2] if '/' in repo else repo})[/dim]"
+    )
 
     # Group paths under their top-level parent
     children: dict[str, list[str]] = {}
@@ -99,7 +102,9 @@ def list_templates(
                 template_names.add(first)
 
         if template_names:
-            branch_node = tree.add(f"[bold]{parent}[/bold] [dim]({len(template_names)} templates)[/dim]")
+            branch_node = tree.add(
+                f"[bold]{parent}[/bold] [dim]({len(template_names)} templates)[/dim]"
+            )
             for name in sorted(template_names):
                 branch_node.add(f"[#FF5C1F]{name}[/#FF5C1F]")
         else:
@@ -109,25 +114,38 @@ def list_templates(
     console.print(f"\n  [dim]{len(paths)} directories, {len(top_level)} categories[/dim]")
 
 
-
 @app.command("install")
 def install_template(
-    template_path: str = typer.Argument(..., help="Path to the template (e.g. agent-templates/bundesliga-podcast)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    template_path: str = typer.Argument(
+        ..., help="Path to the template (e.g. agent-templates/bundesliga-podcast)"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option(DEFAULT_BRANCH, "--branch", "-b", help="Git branch"),
-    private: bool = typer.Option(False, "--private", help="Mark the source repo as private (sends --gh-token / GH_TOKEN to the install endpoint)."),
-    gh_token: Optional[str] = typer.Option(None, "--gh-token", envvar="GH_TOKEN", help="GitHub token for cloning a private repo. Falls back to GH_TOKEN / GITHUB_TOKEN env vars."),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
+    private: bool = typer.Option(
+        False,
+        "--private",
+        help="Mark the source repo as private (sends --gh-token / GH_TOKEN to the install endpoint).",
+    ),
+    gh_token: str | None = typer.Option(
+        None,
+        "--gh-token",
+        envvar="GH_TOKEN",
+        help="GitHub token for cloning a private repo. Falls back to GH_TOKEN / GITHUB_TOKEN env vars.",
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output raw JSON for agent ingestion"
+    ),
 ):
     """Install a template: Provisions cloud resources via API and downloads local agent context."""
-    import httpx
+    import json
     import os
     import urllib.parse
-    import json
+
+    import httpx
 
     client = ProjectClient(project_id)
-    template_name = template_path.split('/')[-1]
+    template_name = template_path.split("/")[-1]
 
     # Auto-detect private repo when a GH token is around but --private wasn't
     # passed; resolves the GITHUB_TOKEN fallback transparently.
@@ -141,7 +159,9 @@ def install_template(
         raise typer.Exit(1)
 
     if not json_output:
-        console.print(f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]")
+        console.print(
+            f"[bold green]Provisioning Machina Cloud resources for '{template_name}'...[/bold green]"
+        )
 
     install_entry: dict = {
         "repo_url": repo,
@@ -156,31 +176,35 @@ def install_template(
     result = client.post("templates/git", payload)
 
     if isinstance(result, dict) and result.get("status") == "error":
-        error_msg = result.get('error', {})
+        error_msg = result.get("error", {})
         if isinstance(error_msg, dict):
-            error_msg = error_msg.get('message', 'Unknown error')
+            error_msg = error_msg.get("message", "Unknown error")
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
             console.print(f"[red]Cloud provisioning failed:[/red] {error_msg}")
-            console.print("\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]")
+            console.print(
+                "\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]"
+            )
         raise typer.Exit(1)
-        
+
     if not json_output:
-        console.print(f"[bold green]Downloading local agent context for '{template_name}'...[/bold green]")
-        
+        console.print(
+            f"[bold green]Downloading local agent context for '{template_name}'...[/bold green]"
+        )
+
     local_dir = Path.cwd() / template_name
     local_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Extract owner/repo from GitHub URL
     repo_cleaned = repo.replace(".git", "").replace(".git/", "").rstrip("/")
     if "github.com/" in repo_cleaned:
         owner_repo = repo_cleaned.split("github.com/")[1]
     else:
         owner_repo = "machina-sports/machina-templates"
-        
+
     api_url = f"https://api.github.com/repos/{owner_repo}/contents/{urllib.parse.quote(template_path)}?ref={branch}"
-    
+
     gh_headers = {"Accept": "application/vnd.github.v3+json"}
     if gh_token:
         gh_headers["Authorization"] = f"Bearer {gh_token}"
@@ -208,118 +232,155 @@ def install_template(
                                         f.write(file_resp.content)
             else:
                 if not json_output:
-                    console.print(f"[yellow]Warning:[/yellow] Could not fetch local files from GitHub API (Status {resp.status_code}).")
+                    console.print(
+                        f"[yellow]Warning:[/yellow] Could not fetch local files from GitHub API (Status {resp.status_code})."
+                    )
     except Exception as e:
         if not json_output:
-            console.print(f"[yellow]Warning:[/yellow] Local download failed: {str(e)}")
-        
+            console.print(f"[yellow]Warning:[/yellow] Local download failed: {e!s}")
+
     # Agent-First Handoff Output
     if json_output:
-        console.print_json(json.dumps({
-            "status": "success",
-            "cloud_provisioned": True,
-            "local_path": f"./{template_name}",
-            "agent_instruction": f"Cloud infrastructure provisioned. Read ./{template_name}/SKILL.md to continue."
-        }))
+        console.print_json(
+            json.dumps(
+                {
+                    "status": "success",
+                    "cloud_provisioned": True,
+                    "local_path": f"./{template_name}",
+                    "agent_instruction": f"Cloud infrastructure provisioned. Read ./{template_name}/SKILL.md to continue.",
+                }
+            )
+        )
     else:
         console.print("\n<machina_install_result>")
         console.print("  <status>success</status>")
         console.print("  <cloud_provisioned>true</cloud_provisioned>")
         console.print(f"  <local_path>./{template_name}</local_path>")
         console.print("  <agent_instruction>")
-        console.print("    1. Cloud infrastructure (connectors/datasets/mappings) successfully provisioned on the Machina Pod.")
-        console.print(f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources.")
+        console.print(
+            "    1. Cloud infrastructure (connectors/datasets/mappings) successfully provisioned on the Machina Pod."
+        )
+        console.print(
+            f"    2. ACTION REQUIRED: Read `./{template_name}/SKILL.md` (or README.md) immediately to understand how to interact with these resources."
+        )
         console.print("  </agent_instruction>")
         console.print("</machina_install_result>")
 
+
 @app.command("push")
 def push_template(
-    target_dir: str = typer.Argument(..., help="Path to local folder containing your custom template (e.g. ./my-agent)"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output raw JSON for agent ingestion"),
+    target_dir: str = typer.Argument(
+        ..., help="Path to local folder containing your custom template (e.g. ./my-agent)"
+    ),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output raw JSON for agent ingestion"
+    ),
 ):
     """Push a custom template from local workspace to the Machina Pod."""
+    import json
     import shutil
     import tempfile
-    import json
-    
+
     client = ProjectClient(project_id)
     target_path = Path(target_dir).resolve()
-    
+
     if not target_path.exists() or not target_path.is_dir():
         if json_output:
-            console.print_json(json.dumps({"status": "error", "message": f"Directory not found: {target_dir}"}))
+            console.print_json(
+                json.dumps({"status": "error", "message": f"Directory not found: {target_dir}"})
+            )
         else:
             console.print(f"[red]Directory not found: {target_dir}[/red]")
         raise typer.Exit(1)
-        
 
     # PRE-FLIGHT LINTER: Validate _install.yml
     install_yaml_path = target_path / "_install.yml"
     if install_yaml_path.exists():
         if not json_output:
-            console.print("[bold yellow]Running pre-flight YAML linter on _install.yml...[/bold yellow]")
+            console.print(
+                "[bold yellow]Running pre-flight YAML linter on _install.yml...[/bold yellow]"
+            )
         import yaml
+
         try:
-            with open(install_yaml_path, 'r') as yf:
+            with open(install_yaml_path, "r") as yf:
                 manifest = yaml.safe_load(yf)
-                
+
             if not isinstance(manifest, dict):
-                raise ValueError("_install.yml must be a valid YAML dictionary.")
-                
+                raise ValueError("_install.yml must be a valid YAML dictionary.")  # noqa: TRY004 — ValueError is this command's documented contract
+
             if "setup" not in manifest:
                 raise ValueError("Missing required root key: 'setup'")
-                
+
             setup_block = manifest.get("setup", {})
             required_setup_keys = ["title", "description", "value", "version"]
             for key in required_setup_keys:
                 if key not in setup_block:
                     raise ValueError(f"Missing required key in setup block: '{key}'")
-                    
+
             if "datasets" not in manifest:
                 raise ValueError("Missing required root key: 'datasets'")
-                
+
         except Exception as e:
-            error_msg = f"Malformed _install.yml: {str(e)}"
+            error_msg = f"Malformed _install.yml: {e!s}"
             if json_output:
-                console.print_json(json.dumps({"status": "error", "message": error_msg, "agent_instruction": "Fix the _install.yml syntax using the mkn-constructor schema and retry push."}))
+                console.print_json(
+                    json.dumps(
+                        {
+                            "status": "error",
+                            "message": error_msg,
+                            "agent_instruction": "Fix the _install.yml syntax using the mkn-constructor schema and retry push.",
+                        }
+                    )
+                )
             else:
                 console.print(f"[bold red]Pre-Flight Linter Failed![/bold red] {error_msg}")
-                console.print("\n[yellow]Agent Action:[/yellow] Review your YAML syntax. Ensure 'setup' and 'datasets' are present. Refer to mkn-constructor schemas.")
+                console.print(
+                    "\n[yellow]Agent Action:[/yellow] Review your YAML syntax. Ensure 'setup' and 'datasets' are present. Refer to mkn-constructor schemas."
+                )
             raise typer.Exit(1)
     else:
         if not json_output:
-            console.print("[yellow]Warning: No _install.yml found in the template folder. Continuing push...[/yellow]")
+            console.print(
+                "[yellow]Warning: No _install.yml found in the template folder. Continuing push...[/yellow]"
+            )
 
     if not json_output:
         console.print(f"[bold green]Zipping {target_path.name} for deployment...[/bold green]")
-        
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         zip_path = Path(tmpdirname) / target_path.name
         # Create a zip archive of the directory
-        shutil.make_archive(str(zip_path), 'zip', target_path)
+        shutil.make_archive(str(zip_path), "zip", target_path)
         zip_file = f"{zip_path}.zip"
-        
+
         if not json_output:
             console.print("[bold green]Deploying to Machina Cloud Pod...[/bold green]")
-            
+
         result = client.post_file("templates/upload", zip_file)
 
     if isinstance(result, dict) and result.get("status") == "error":
-        error_msg = result.get('error', {})
+        error_msg = result.get("error", {})
         if isinstance(error_msg, dict):
-            error_msg = error_msg.get('message', 'Unknown error')
+            error_msg = error_msg.get("message", "Unknown error")
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
             console.print(f"[red]Deployment failed:[/red] {error_msg}")
         raise typer.Exit(1)
-        
+
     if json_output:
-        console.print_json(json.dumps({
-            "status": "success",
-            "message": f"Successfully deployed custom template {target_path.name} to the cloud."
-        }))
+        console.print_json(
+            json.dumps(
+                {
+                    "status": "success",
+                    "message": f"Successfully deployed custom template {target_path.name} to the cloud.",
+                }
+            )
+        )
     else:
-        console.print(f"\n[bold blue]Successfully deployed '{target_path.name}' to the Machina Cloud Pod![/bold blue]")
+        console.print(
+            f"\n[bold blue]Successfully deployed '{target_path.name}' to the Machina Cloud Pod![/bold blue]"
+        )
         console.print("Your custom workflows and datasets are now live.")

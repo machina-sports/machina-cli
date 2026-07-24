@@ -41,7 +41,7 @@ Issues = "https://github.com/machina-sports/machina-cli/issues"
 machina = "machina_cli.main:run"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff<0.16"]
+dev = ["pytest>=8.0", "ruff>=0.16,<0.17"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/machina_cli"]
@@ -49,3 +49,13 @@ packages = ["src/machina_cli"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+  # Deliberate CLI patterns — a user-facing command degrades gracefully
+  # instead of stack-tracing; the console error IS the handling.
+  "BLE001", # blind `except Exception` around user-facing operations
+  "S110",   # try/except/pass for best-effort side quests (telemetry, cache)
+  # Typer's dependency-injection idiom: `def cmd(x = typer.Option(...))`.
+  "B008",
+]

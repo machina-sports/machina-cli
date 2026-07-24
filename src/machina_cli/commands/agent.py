@@ -3,12 +3,11 @@
 import json as json_lib
 import sys
 import time
-from typing import Optional, List
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.tree import Tree
 
 from machina_cli.project_client import ProjectClient
@@ -19,24 +18,28 @@ console = Console()
 
 @app.command("list")
 def list_agents(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     page: int = typer.Option(1, "--page", help="Page number"),
     page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List agents in the current project."""
     client = ProjectClient(project_id)
-    result = client.post("agent/search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["name", 1],
-    })
+    result = client.post(
+        "agent/search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["name", 1],
+        },
+    )
 
     agents = result.get("data", [])
 
     if json_output:
         import json
+
         console.print_json(json.dumps(agents, default=str))
         return
 
@@ -78,7 +81,7 @@ def list_agents(
 @app.command("get")
 def get_agent(
     name: str = typer.Argument(..., help="Agent name or slug"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Get agent details by name — shows workflows, context, and activity."""
@@ -89,6 +92,7 @@ def get_agent(
 
     if json_output:
         import json
+
         console.print_json(json.dumps(data, default=str))
         return
 
@@ -162,8 +166,8 @@ def get_agent(
 @app.command("run")
 def run_agent(
     name: str = typer.Argument(..., help="Agent name"),
-    params: Optional[List[str]] = typer.Argument(None, help="Parameters as key=value pairs"),
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    params: list[str] | None = typer.Argument(None, help="Parameters as key=value pairs"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     sync: bool = typer.Option(False, "--sync", "-s", help="Wait for result (synchronous)"),
     watch: bool = typer.Option(False, "--watch", "-w", help="Watch execution progress"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -200,7 +204,9 @@ def run_agent(
                     value = int(value)
                 context_agent[key] = value
             else:
-                console.print(f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]")
+                console.print(
+                    f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]"
+                )
 
     # Interactive mode: if no params and there are available inputs, show them
     if not params and available_inputs and sys.stdin.isatty():
@@ -216,7 +222,7 @@ def run_agent(
 
         for key, default_expr in available_inputs.items():
             hint = ""
-            if isinstance(default_expr, str):
+            if isinstance(default_expr, str):  # noqa: SIM102 — nested ifs mirror the docs' decision tree
                 # e.g. "$.get('force-competitors', False)" → default: False
                 if "," in default_expr and "$.get(" in default_expr:
                     parts = default_expr.split(",", 1)
@@ -273,25 +279,30 @@ def run_agent(
         # Sync mode — show result directly
         response = data.get("response", {})
         status = "completed"
-        console.print(Panel(
-            f"[bold]Status:[/bold] [green]{status}[/green]\n"
-            f"[bold]Agent Run ID:[/bold] {agent_run_id}",
-            title="Execution Complete",
-            border_style="#FF5C1F",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Status:[/bold] [green]{status}[/green]\n"
+                f"[bold]Agent Run ID:[/bold] {agent_run_id}",
+                title="Execution Complete",
+                border_style="#FF5C1F",
+            )
+        )
         if response:
             formatted = json_lib.dumps(response, indent=2, default=str, ensure_ascii=False)
             from rich.syntax import Syntax
+
             console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Response"))
     else:
         # Async mode — show run ID
-        console.print(Panel(
-            f"[bold]Agent Run ID:[/bold] {agent_run_id}\n"
-            f"[bold]Task ID:[/bold] {task_id}\n"
-            f"[bold]Status:[/bold] [yellow]scheduled[/yellow]",
-            title="Agent Scheduled",
-            border_style="#FF5C1F",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Agent Run ID:[/bold] {agent_run_id}\n"
+                f"[bold]Task ID:[/bold] {task_id}\n"
+                f"[bold]Status:[/bold] [yellow]scheduled[/yellow]",
+                title="Agent Scheduled",
+                border_style="#FF5C1F",
+            )
+        )
         console.print(f"  [dim]Track with:[/dim] [bold]machina execution get {agent_run_id}[/bold]")
 
     # Watch mode — poll for completion
@@ -310,51 +321,70 @@ def run_agent(
                     if run_status in ("agent-executed", "completed", "failed"):
                         console.print()
                         exec_time = run_data.get("execution_time")
-                        time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else "N/A"
-                        color = "green" if "executed" in run_status or "completed" in run_status else "red"
+                        time_str = (
+                            f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else "N/A"
+                        )
+                        color = (
+                            "green"
+                            if "executed" in run_status or "completed" in run_status
+                            else "red"
+                        )
 
-                        console.print(Panel(
-                            f"[bold]Status:[/bold] [{color}]{run_status}[/{color}]\n"
-                            f"[bold]Time:[/bold] {time_str}\n"
-                            f"[bold]Workflows:[/bold] {run_data.get('completed_workflows', 0)}/{run_data.get('total_workflows', 0)}",
-                            title="Execution Complete",
-                            border_style="#FF5C1F",
-                        ))
+                        console.print(
+                            Panel(
+                                f"[bold]Status:[/bold] [{color}]{run_status}[/{color}]\n"
+                                f"[bold]Time:[/bold] {time_str}\n"
+                                f"[bold]Workflows:[/bold] {run_data.get('completed_workflows', 0)}/{run_data.get('total_workflows', 0)}",
+                                title="Execution Complete",
+                                border_style="#FF5C1F",
+                            )
+                        )
 
                         response = run_data.get("response", {})
                         if response:
-                            formatted = json_lib.dumps(response, indent=2, default=str, ensure_ascii=False)
+                            formatted = json_lib.dumps(
+                                response, indent=2, default=str, ensure_ascii=False
+                            )
                             from rich.syntax import Syntax
-                            console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Response"))
+
+                            console.print(
+                                Panel(Syntax(formatted, "json", theme="monokai"), title="Response")
+                            )
                         break
                 except Exception:
                     pass
 
             if elapsed >= 300:
                 console.print("  [yellow]Timed out watching. Agent may still be running.[/yellow]")
-                console.print(f"  [dim]Check with:[/dim] [bold]machina execution get {agent_run_id}[/bold]")
+                console.print(
+                    f"  [dim]Check with:[/dim] [bold]machina execution get {agent_run_id}[/bold]"
+                )
 
 
 @app.command("executions")
 def list_executions(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     page: int = typer.Option(1, "--page", help="Page number"),
     page_size: int = typer.Option(20, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List recent agent executions."""
     client = ProjectClient(project_id)
-    result = client.post("execution/agent-search", {
-        "filters": {},
-        "page": page,
-        "page_size": page_size,
-        "sorters": ["_id", -1],
-    })
+    result = client.post(
+        "execution/agent-search",
+        {
+            "filters": {},
+            "page": page,
+            "page_size": page_size,
+            "sorters": ["_id", -1],
+        },
+    )
 
     executions = result.get("data", [])
 
     if json_output:
         import json
+
         console.print_json(json.dumps(executions, default=str))
         return
 
@@ -372,7 +402,13 @@ def list_executions(
 
     for ex in executions:
         status = ex.get("status", "")
-        color = "green" if status in ("agent-executed", "completed", "success") else "red" if "fail" in status else "yellow"
+        color = (
+            "green"
+            if status in ("agent-executed", "completed", "success")
+            else "red"
+            if "fail" in status
+            else "yellow"
+        )
         exec_time = ex.get("execution_time")
         time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else ""
         total_wf = ex.get("total_workflows")

@@ -1,7 +1,5 @@
 """Organization management commands."""
 
-from typing import Optional
-
 import httpx
 import typer
 from rich.console import Console
@@ -74,7 +72,7 @@ def list_orgs(
 @app.command()
 def create(
     name: str = typer.Argument(..., help="Organization name"),
-    slug: Optional[str] = typer.Option(
+    slug: str | None = typer.Option(
         None, "--slug", "-s", help="Organization slug (auto-generated if omitted)"
     ),
 ):
@@ -190,14 +188,14 @@ def _nullctx():
 
 @app.command()
 def usage(
-    org_id: Optional[str] = typer.Option(
+    org_id: str | None = typer.Option(
         None, "--org", "-o", help="Organization ID (uses default if omitted)"
     ),
-    project_id: Optional[str] = typer.Option(
+    project_id: str | None = typer.Option(
         None, "--project", "-p", help="Limit to a single project"
     ),
     days: int = typer.Option(30, "--days", "-d", help="Rolling window: look back this many days"),
-    month: Optional[str] = typer.Option(
+    month: str | None = typer.Option(
         None,
         "--month",
         "-m",
@@ -209,7 +207,7 @@ def usage(
         help="Full previous calendar month (relative to today). Overrides --days.",
     ),
     top: int = typer.Option(10, "--top", help="Number of top agents to show"),
-    limit: Optional[int] = typer.Option(
+    limit: int | None = typer.Option(
         None,
         "--limit",
         "-l",
@@ -244,7 +242,7 @@ def usage(
     if month:
         try:
             year, mon = (int(part) for part in str(month).split("-"))
-            first = datetime(year, mon, 1)
+            first = datetime(year, mon, 1, tzinfo=timezone.utc)
         except (ValueError, TypeError):
             console.print("[red]--month must be YYYY-MM (e.g. 2026-06).[/red]")
             raise typer.Exit(1)
@@ -253,7 +251,7 @@ def usage(
         end_date = f"{year:04d}-{mon:02d}-{last_day:02d}"
         window_label = first.strftime("%B %Y")
     elif last_month:
-        prev_end = datetime(now.year, now.month, 1) - timedelta(days=1)
+        prev_end = datetime(now.year, now.month, 1, tzinfo=timezone.utc) - timedelta(days=1)
         last_day = _calendar.monthrange(prev_end.year, prev_end.month)[1]
         start_date = f"{prev_end.year:04d}-{prev_end.month:02d}-01"
         end_date = f"{prev_end.year:04d}-{prev_end.month:02d}-{last_day:02d}"
@@ -375,9 +373,7 @@ def usage(
         return
 
     if grand_total == 0:
-        console.print(
-            f"[yellow]No token usage in {window_label} for {scope} {scope_id}.[/yellow]"
-        )
+        console.print(f"[yellow]No token usage in {window_label} for {scope} {scope_id}.[/yellow]")
         return
 
     prompt_pct = grand_prompt / grand_total * 100 if grand_total else 0
@@ -393,8 +389,7 @@ def usage(
     )
     console.print(
         Panel.fit(
-            scope_line
-            + f"[bold]Window:[/bold] {window_label} ({start_date} → {end_date})\n"
+            scope_line + f"[bold]Window:[/bold] {window_label} ({start_date} → {end_date})\n"
             f"[bold]Total tokens:[/bold] {grand_total:,}\n"
             f"[bold]  input:[/bold] {grand_prompt:,} ({prompt_pct:.1f}%)   "
             f"[bold]output:[/bold] {grand_completion:,} ({completion_pct:.1f}%)\n"

@@ -14,7 +14,6 @@ See docs/agentic-harness-loop.md for the full design.
 """
 
 import uuid
-from typing import Optional
 
 from machina_cli.project_client import ProjectClient
 
@@ -30,7 +29,7 @@ def new_session_id() -> str:
 class LoopClient:
     """Driver for the server-side harness loop."""
 
-    def __init__(self, project_id: Optional[str] = None):
+    def __init__(self, project_id: str | None = None):
         self._pc = ProjectClient(project_id)
 
     def _exec(self, op: str, **ctx) -> dict:
@@ -62,7 +61,7 @@ class LoopClient:
         """Pause a session (the runner sets status=paused)."""
         return self._exec("stop", session_id=session_id)
 
-    def get_session(self, session_id: str) -> Optional[dict]:
+    def get_session(self, session_id: str) -> dict | None:
         """Return the session payload (the doc's `value`), with `_id` injected."""
         body = {
             "filters": {"name": SESSION_NAME, "value.session_id": session_id},

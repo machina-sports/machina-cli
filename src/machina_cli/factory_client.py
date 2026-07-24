@@ -20,7 +20,7 @@ Two auth modes, in priority order:
 
 import json as json_lib
 import os
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 import httpx
 from rich.console import Console
@@ -48,13 +48,11 @@ PROJECT_COOKIE = os.environ.get("MACHINA_PROJECT_COOKIE_NAME", "machina_project_
 
 def get_factory_url() -> str:
     return (
-        os.environ.get("MACHINA_FACTORY_URL")
-        or get_config("factory_url")
-        or DEFAULT_FACTORY_URL
+        os.environ.get("MACHINA_FACTORY_URL") or get_config("factory_url") or DEFAULT_FACTORY_URL
     ).rstrip("/")
 
 
-def _resolve_session_token() -> Optional[str]:
+def _resolve_session_token() -> str | None:
     """The studio session JWT, if present and unexpired."""
     token = os.environ.get("MACHINA_SESSION_TOKEN") or get_credential("session_token")
     if token and not _is_jwt_expired(token):
@@ -62,11 +60,11 @@ def _resolve_session_token() -> Optional[str]:
     return None
 
 
-def _resolve_api_key() -> Optional[str]:
+def _resolve_api_key() -> str | None:
     return os.environ.get("MACHINA_API_KEY") or get_credential("api_key")
 
 
-def _resolve_project_token(project_id: Optional[str]) -> Optional[str]:
+def _resolve_project_token(project_id: str | None) -> str | None:
     """Advisory project JWT for the `machina_project_key` cookie.
 
     Only used to tag a session-mode job with the right studio project. Returns
@@ -84,7 +82,7 @@ def _resolve_project_token(project_id: Optional[str]) -> Optional[str]:
 class FactoryClient:
     """HTTP client for the Factory customer surface (`/c/api/*`)."""
 
-    def __init__(self, project_id: Optional[str] = None):
+    def __init__(self, project_id: str | None = None):
         self.base_url = get_factory_url()
         self.project_id = project_id or get_config("default_project_id")
 
@@ -102,9 +100,7 @@ class FactoryClient:
         # identity (uid) so jobs are owned by you, not just the project.
         self.mode = "session" if self.session_token else "apikey"
         self.project_token = (
-            _resolve_project_token(self.project_id)
-            if self.mode == "session"
-            else None
+            _resolve_project_token(self.project_id) if self.mode == "session" else None
         )
         # In api-key mode the customers app has no studio JWTs to build the
         # job's pod credentials, so the CLI supplies the client-api URL it
@@ -140,13 +136,23 @@ class FactoryClient:
         error_msg = ""
         if isinstance(data, dict):
             err = data.get("error")
-            error_msg = err if isinstance(err, str) else (err or {}).get("message", "") if isinstance(err, dict) else ""
+            error_msg = (
+                err
+                if isinstance(err, str)
+                else (err or {}).get("message", "")
+                if isinstance(err, dict)
+                else ""
+            )
 
         if response.status_code == 401:
             if self.mode == "session":
-                console.print("[red]Studio session expired or invalid.[/red] Run [bold]machina login[/bold] to refresh.")
+                console.print(
+                    "[red]Studio session expired or invalid.[/red] Run [bold]machina login[/bold] to refresh."
+                )
             else:
-                console.print("[red]API key rejected by Factory.[/red] The customers app may not accept api-key auth yet, or the key is invalid.")
+                console.print(
+                    "[red]API key rejected by Factory.[/red] The customers app may not accept api-key auth yet, or the key is invalid."
+                )
             raise SystemExit(1)
         if response.status_code == 402:
             console.print(f"[red]{error_msg or 'Insufficient credits for this build.'}[/red]")
@@ -161,34 +167,40 @@ class FactoryClient:
             console.print(f"[red]{error_msg or 'Factory API not configured / unavailable.'}[/red]")
             raise SystemExit(1)
         if response.status_code >= 400:
-            console.print(f"[red]{error_msg or f'Factory error (HTTP {response.status_code}).'}[/red]")
+            console.print(
+                f"[red]{error_msg or f'Factory error (HTTP {response.status_code}).'}[/red]"
+            )
             raise SystemExit(1)
 
         return data if isinstance(data, dict) else {"data": data}
 
     # -- verbs ----------------------------------------------------------------
 
-    def get(self, path: str, params: Optional[dict] = None) -> dict:
+    def get(self, path: str, params: dict | None = None) -> dict:
         url = f"{self.base_url}/{path.lstrip('/')}"
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
-                resp = client.get(url, headers=self._headers(), cookies=self._cookies(), params=params)
+                resp = client.get(
+                    url, headers=self._headers(), cookies=self._cookies(), params=params
+                )
                 return self._handle_response(resp)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Factory at {self.base_url}[/red]")
             raise SystemExit(1)
 
-    def post(self, path: str, json_data: Optional[dict] = None) -> dict:
+    def post(self, path: str, json_data: dict | None = None) -> dict:
         url = f"{self.base_url}/{path.lstrip('/')}"
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
-                resp = client.post(url, headers=self._headers(), cookies=self._cookies(), json=json_data or {})
+                resp = client.post(
+                    url, headers=self._headers(), cookies=self._cookies(), json=json_data or {}
+                )
                 return self._handle_response(resp)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Factory at {self.base_url}[/red]")
             raise SystemExit(1)
 
-    def stream(self, path: str, params: Optional[dict] = None) -> Iterator[dict]:
+    def stream(self, path: str, params: dict | None = None) -> Iterator[dict]:
         """Yield decoded events from a Server-Sent Events endpoint.
 
         Used by `factory logs --follow` against `/c/api/stream/{id}`. Yields the
@@ -198,8 +210,10 @@ class FactoryClient:
         url = f"{self.base_url}/{path.lstrip('/')}"
         headers = {**self._headers(), "Accept": "text/event-stream"}
         try:
-            with httpx.Client(timeout=None) as client:
-                with client.stream("GET", url, headers=headers, cookies=self._cookies(), params=params) as resp:
+            with httpx.Client(timeout=None) as client:  # noqa: SIM117 — separate contexts keep the teardown order explicit
+                with client.stream(
+                    "GET", url, headers=headers, cookies=self._cookies(), params=params
+                ) as resp:
                     if resp.status_code >= 400:
                         resp.read()
                         self._handle_response(resp)
@@ -207,7 +221,7 @@ class FactoryClient:
                     for line in resp.iter_lines():
                         if not line or not line.startswith("data:"):
                             continue
-                        payload = line[len("data:"):].strip()
+                        payload = line[len("data:") :].strip()
                         if not payload or payload == "[DONE]":
                             continue
                         try:
