@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Unauthenticated project commands now say "log in" instead of "select a project".** `ProjectClient` checked for a selected project before checking authentication, so a fresh, logged-out user running `machina template list` was told to run `machina project use <id>` — a command whose prerequisite (`machina project list`) then failed with the login error one step later. Authentication is checked first, matching the onboarding order (login → project → template) documented everywhere, including the sports-skills `machina` skill's recovery table. API-key users (env or stored) still get the project message, never a spurious login prompt. Found by an end-to-end walkthrough of the sports-skills → machina handoff.
+
 ## [0.8.0] - 2026-07-24
 
 ### Added

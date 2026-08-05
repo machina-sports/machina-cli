@@ -118,6 +118,14 @@ class ProjectClient:
         self.project_id = project_id or get_config("default_project_id")
 
         if not self.project_id:
+            # Login comes before project selection in onboarding, so check auth
+            # first: an unauthenticated user sent to `machina project use` just
+            # hits the login error one command later. resolve_auth_token covers
+            # every mode (env API key, stored API key, session token).
+            _, token = resolve_auth_token()
+            if not token:
+                console.print("[red]Not authenticated. Run `machina login` first.[/red]")
+                raise SystemExit(1)
             console.print("[red]No project selected. Run `machina project use <id>` first.[/red]")
             raise SystemExit(1)
 
