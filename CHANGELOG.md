@@ -4,6 +4,8 @@ All notable changes to machina-cli are documented here.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-25
+
 ### Fixed
 - **`machina template push` works — every upload used to die as "No file uploaded".** `post_file()` sent the JSON `Content-Type` from `_headers()` alongside `files=`, which overrides the `multipart/form-data` boundary httpx generates, so the pod's Flask never parsed `request.files` — against every pod, since the command shipped. Multipart requests now strip the Content-Type (auth headers stay) and let httpx set the boundary; a regression test pins the header shape and the file's presence in the body. Verified live: `template push agent-templates/machina-assistant --project <world-cup-2>` → success, template upserted. (86ak5p3wu)
 - **Unauthenticated project commands now say "log in" instead of "select a project".** `ProjectClient` checked for a selected project before checking authentication, so a fresh, logged-out user running `machina template list` was told to run `machina project use <id>` — a command whose prerequisite (`machina project list`) then failed with the login error one step later. Authentication is checked first, matching the onboarding order (login → project → template) documented everywhere, including the sports-skills `machina` skill's recovery table. API-key users (env or stored) still get the project message, never a spurious login prompt. Found by an end-to-end walkthrough of the sports-skills → machina handoff.
