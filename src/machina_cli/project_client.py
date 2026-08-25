@@ -210,11 +210,16 @@ class ProjectClient:
         mime_type, _ = mimetypes.guess_type(file_path)
         mime_type = mime_type or "application/octet-stream"
 
+        # Multipart uploads must NOT carry the JSON Content-Type from
+        # _headers(): an explicit header overrides the multipart boundary
+        # httpx generates for `files=`, Flask never sees request.files, and
+        # every upload dies as "No file uploaded". Auth headers stay.
+        headers = {k: v for k, v in self._headers().items() if k.lower() != "content-type"}
         try:
             with httpx.Client(timeout=60.0) as client:
                 with open(file_path, "rb") as f:
                     files = {"file": (os.path.basename(file_path), f, mime_type)}
-                    response = client.post(url, headers=self._headers(), data=data, files=files)
+                    response = client.post(url, headers=headers, data=data, files=files)
                 return self._handle_response(response)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
