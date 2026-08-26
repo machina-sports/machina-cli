@@ -334,6 +334,12 @@ def start_repl():
         readline.read_history_file(history_file)
     except FileNotFoundError:
         pass
+    except OSError:
+        # On macOS, readline is backed by libedit. Loading an empty history
+        # file (one containing only the "_HiStOrY_V2_" header and no entries)
+        # raises OSError: [Errno 1] Operation not permitted. Ignore it so the
+        # REPL still starts. See machina-sports/machina-cli#<issue>.
+        pass
 
     _show_repl_banner()
 
