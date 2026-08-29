@@ -2,7 +2,7 @@
 
 All notable changes to machina-cli are documented here.
 
-## [Unreleased]
+## [0.8.2] - 2026-08-29
 
 ### Added
 - `machina update --check` reports release availability without modifying the installation.
