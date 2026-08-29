@@ -1,14 +1,22 @@
 """Connector management commands."""
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Connector management")
-console = Console()
 
 
 @app.command("list")
@@ -19,6 +27,7 @@ def list_connectors(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List connectors in the current project."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "connector/search",
@@ -30,40 +39,33 @@ def list_connectors(
         },
     )
 
-    items = result.get("data", [])
+    items = extract_collection(result)
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(items, default=str))
+        emit_json(items)
         return
 
     if not items:
-        console.print("[yellow]No connectors found.[/yellow]")
+        empty_state("connectors")
         return
 
-    table = Table(title="Connectors")
-    table.add_column("Name", style="bold")
-    table.add_column("Type", style="dim")
-    table.add_column("Status")
-    table.add_column("ID", style="dim")
+    table = make_table("Connectors", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Type", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for item in items:
         status = item.get("status", item.get("enabled", ""))
-        color = "green" if status in ("active", True) else "dim"
         table.add_row(
-            item.get("name", ""),
-            item.get("type", item.get("connector_type", "")),
-            f"[{color}]{status}[/{color}]",
-            item.get("_id", ""),
+            cell(item.get("name", ""), style="bold"),
+            cell(item.get("type", item.get("connector_type", "")), style="dim"),
+            status_cell(status),
+            cell(item.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(items)} of {total} connectors)[/dim]")
+    render_pagination(result, page=page, page_size=page_size, count=len(items), noun="connectors")
 
 
 @app.command("get")

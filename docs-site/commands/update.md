@@ -6,6 +6,7 @@ Keep the CLI current, and check which version you're running.
 
 ```bash
 machina update                         # update to the latest version
+machina update --check                 # check without installing anything
 machina update --force                 # force a re-install even if current
 machina version                        # show the installed version
 ```
@@ -14,10 +15,11 @@ machina version                        # show the installed version
 
 | Flag | Short | Description |
 |------|-------|-------------|
+| `--check` | | Check for a newer release without installing it |
 | `--force` | `-f` | Update even if already on the latest version |
 
 ::: tip
-Installed from PyPI? You can also update with `pip install --upgrade machina-cli` (or `pipx upgrade machina-cli`). `machina update` works regardless of how you installed.
+`machina update` preserves the installation method: standalone binaries are replaced in place, while pip/pipx installations are upgraded through their Python environment. Editable development installs are never overwritten.
 :::
 
 ## Automatic update notices

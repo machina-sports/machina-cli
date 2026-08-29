@@ -4,13 +4,11 @@ import json
 import re
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from machina_cli.config import get_config, load_config, set_config
+from machina_cli.ui import cell, console, make_table
 
 app = typer.Typer(help="Configuration management")
-console = Console()
 
 # Keys whose values are secrets and must never be printed in bulk output.
 _SECRET_KEY = re.compile(r"(api[_-]?key|token|secret|password)", re.IGNORECASE)
@@ -64,12 +62,14 @@ def config_list(
         print(json.dumps(config))
         return
 
-    table = Table(title="Configuration")
-    table.add_column("Key")
-    table.add_column("Value")
+    table = make_table("Configuration", expand=True)
+    table.add_column("Key", ratio=2, overflow="ellipsis")
+    table.add_column("Value", ratio=3, overflow="fold")
 
     for key, value in sorted(config.items()):
-        display_value = str(value) if value else "[dim]<empty>[/dim]"
-        table.add_row(key, display_value)
+        table.add_row(
+            cell(key, style="bold"),
+            cell(value, empty="<empty>", style="" if value else "dim"),
+        )
 
     console.print(table)

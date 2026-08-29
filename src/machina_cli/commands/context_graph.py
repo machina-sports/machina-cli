@@ -12,15 +12,13 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import cell, console, emit_json, extract_collection, make_table
 
 app = typer.Typer(help="Context Graph — self-healing status")
-console = Console()
 
 # agents that make up the self-healing / monitoring layer
 SELF_HEAL_AGENTS = (
@@ -83,8 +81,7 @@ def _docs(client: ProjectClient, name: str, page_size: int = 12) -> list:
             "sorters": ["updated", -1],
         },
     )
-    d = r.get("data")
-    return (d.get("data") if isinstance(d, dict) else d) or []
+    return extract_collection(r)
 
 
 def _edge_summary(edge: str, h: dict) -> tuple:
@@ -146,8 +143,7 @@ def _collect(project_id: str) -> dict:
     )
     agents = {}
     ar = client.post("agent/search", {"filters": {}, "page": 1, "page_size": 100})
-    ad = ar.get("data")
-    for a in (ad.get("data") if isinstance(ad, dict) else ad) or []:
+    for a in extract_collection(ar):
         if a.get("name") in SELF_HEAL_AGENTS:
             agents[a["name"]] = {
                 "status": a.get("status"),
@@ -219,7 +215,7 @@ def status(
     res = core.post(
         "user/projects/search", {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]}
     )
-    projects = res.get("data", []) or []
+    projects = extract_collection(res)
     rows, skipped = [], 0
     for p in projects:
         pid = p.get("project_id") or p.get("id")
@@ -240,29 +236,31 @@ def status(
         rows.append((pname, pid, st))
 
     if json_output:
-        console.print_json(
-            json_lib.dumps(
-                {"projects": [{"name": n, "id": i, **s} for n, i, s in rows], "skipped": skipped},
-                default=str,
-            )
+        emit_json(
+            {
+                "projects": [{"name": n, "id": i, **s} for n, i, s in rows],
+                "skipped": skipped,
+            }
         )
         return
 
     if not rows:
         console.print("[yellow]No projects have self-healing provisioned (or reachable).[/yellow]")
         return
-    table = Table(title="Self-healing across the org")
-    table.add_column("Project", style="bold")
+    table = make_table("Self-healing across the org", expand=True)
+    table.add_column("Project", ratio=3, overflow="ellipsis")
     table.add_column("Edges", justify="right")
-    table.add_column("Surface")
-    table.add_column("Beat")
+    table.add_column("Surface", no_wrap=True)
+    table.add_column("Beat", no_wrap=True)
     for pname, pid, st in rows:
         n_edges = str(len(st["edges"]))
         s = st["surface"]
-        surf = "—"
+        surf = cell(None)
         if s:
             v = s.get("verdict", "?")
-            surf = f"[{'green' if v == 'ok' else 'yellow' if v == 'low_traffic' else 'red'}]{v}[/]"
+            surf = cell(
+                v, style="green" if v == "ok" else "yellow" if v == "low_traffic" else "red"
+            )
         beat = (
             st["agents"].get("surface-watch-beat")
             or st["agents"].get("loop-beat")
@@ -270,16 +268,17 @@ def status(
         )
         if beat:
             live = beat["status"] == "active" and beat["scheduled"] is False
-            beat_s = (
-                "[green]live[/]"
+            beat_s = cell(
+                "live"
                 if live
-                else (
-                    "[red]active/scheduled=True[/]" if beat["status"] == "active" else "[dim]off[/]"
-                )
+                else "active/scheduled=True"
+                if beat["status"] == "active"
+                else "off",
+                style="green" if live else "red" if beat["status"] == "active" else "dim",
             )
         else:
-            beat_s = "[dim]none[/]"
-        table.add_row(pname, n_edges, surf, beat_s)
+            beat_s = cell("none", style="dim")
+        table.add_row(cell(pname, style="bold"), cell(n_edges), surf, beat_s)
     console.print(table)
     if skipped:
         console.print(f"[dim]{skipped} project(s) skipped (unreachable / no access).[/]")
@@ -449,7 +448,7 @@ def timeline(
             "user/projects/search",
             {"filters": {}, "page": 1, "page_size": 200, "sorters": ["name", 1]},
         )
-        for p in res.get("data", []) or []:
+        for p in extract_collection(res):
             pid = p.get("project_id") or p.get("id")
             pname = p.get("project_name") or p.get("name") or pid
             if not pid:
@@ -493,25 +492,29 @@ def timeline(
             "window_days": days,
             "skipped": skipped,
         }
-        console.print_json(json_lib.dumps(payload))
+        emit_json(payload)
         return
 
     if not rows:
         console.print(f"[yellow]No self-healing events in the last {days} day(s).[/yellow]")
         return
-    table = Table(title=f"Self-healing timeline — last {days} day(s)")
-    table.add_column("Time (UTC)", style="dim", no_wrap=True)
+    table = make_table(f"Self-healing timeline — last {days} day(s)", expand=True)
+    table.add_column("Time (UTC)", no_wrap=True)
     if org:
-        table.add_column("Project", style="bold")
-    table.add_column("Edge")
-    table.add_column("Event")
-    table.add_column("Detail", overflow="fold")
+        table.add_column("Project", ratio=2, overflow="ellipsis")
+    table.add_column("Edge", ratio=2, overflow="ellipsis")
+    table.add_column("Event", no_wrap=True)
+    table.add_column("Detail", ratio=3, overflow="fold")
     for pname, e in rows:
         style = _EVENT_STYLE.get(e["event"], "")
-        cells = [e["ts"].strftime("%b %d %H:%M")]
+        cells = [cell(e["ts"].strftime("%b %d %H:%M"), style="dim")]
         if org:
-            cells.append(pname)
-        cells += [e["edge"], f"[{style}]{e['event']}[/]" if style else e["event"], e["detail"]]
+            cells.append(cell(pname, style="bold"))
+        cells += [
+            cell(e["edge"]),
+            cell(e["event"], style=style),
+            cell(e["detail"]),
+        ]
         table.add_row(*cells)
     console.print(table)
     console.print(

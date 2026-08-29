@@ -4,6 +4,14 @@ All notable changes to machina-cli are documented here.
 
 ## [Unreleased]
 
+### Added
+- `machina update --check` reports release availability without modifying the installation.
+
+### Changed
+- Command discovery now comes from one responsive catalog shared by the banner and REPL, with contextual `help <command>` and flag completion.
+- Resource tables share safe literal-cell rendering, status colors, nested API response handling, pagination validation, and accurate page ranges.
+- Self-update preserves the active installation method (standalone binary or pip/pipx) and refuses to overwrite editable development installs.
+
 ## [0.8.1] - 2026-08-25
 
 ### Fixed

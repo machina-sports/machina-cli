@@ -17,6 +17,7 @@ import time
 
 from machina_cli import __version__
 from machina_cli.config import CONFIG_DIR
+from machina_cli.versioning import is_newer
 
 CACHE_FILE = CONFIG_DIR / "update_check.json"
 CHECK_INTERVAL_SECONDS = 24 * 60 * 60  # once a day
@@ -26,19 +27,9 @@ _shown = False  # per-process guard -- never print the banner twice (e.g. once
 # at REPL start, once again when the process later exits)
 
 
-def _parse_version(v: str) -> tuple:
-    parts = []
-    for p in v.split("."):
-        digits = "".join(c for c in p if c.isdigit())
-        parts.append(int(digits) if digits else 0)
-    return tuple(parts)
-
-
 def _is_newer(latest: str, current: str) -> bool:
-    try:
-        return _parse_version(latest) > _parse_version(current)
-    except Exception:
-        return False
+    """Backward-compatible wrapper for callers/tests of the old helper."""
+    return is_newer(latest, current)
 
 
 def _read_cache() -> dict:

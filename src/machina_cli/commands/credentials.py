@@ -3,14 +3,20 @@
 import json
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
+from machina_cli.ui import (
+    cell,
+    console,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    validate_pagination,
+)
 
 app = typer.Typer(help="API key management")
-console = Console()
 
 
 @app.command()
@@ -66,9 +72,12 @@ def list_keys(
     copy: str | None = typer.Option(
         None, "--copy", "-c", help="Copy a key by name (e.g. client-api) to clipboard"
     ),
+    page: int = typer.Option(1, "--page", help="Page number"),
+    page_size: int = typer.Option(50, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List API keys for a project."""
+    validate_pagination(page, page_size)
     client = MachinaClient()
 
     if not project_id:
@@ -86,8 +95,8 @@ def list_keys(
             {
                 "filters": {"project_id": project_id},
                 "sorters": ["name", 1],
-                "page": 1,
-                "page_size": 50,
+                "page": page,
+                "page_size": page_size,
             },
         )
     except SystemExit:
@@ -97,7 +106,7 @@ def list_keys(
             raise typer.Exit(1) from None
         raise
 
-    keys = result.get("data", [])
+    keys = extract_collection(result)
 
     if json_output:
         # Masked by default; full keys only with --show-keys (matches table output).
@@ -117,7 +126,7 @@ def list_keys(
         return
 
     if not keys:
-        console.print("[yellow]No API keys found.[/yellow]")
+        empty_state("API keys")
         return
 
     # --copy mode: find key by name and copy to clipboard
@@ -140,25 +149,26 @@ def list_keys(
             )
         return
 
-    table = Table(title="API Keys")
-    table.add_column("Name", style="bold")
-    table.add_column("Key")
-    table.add_column("ID", style="dim")
+    table = make_table("API keys", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Key", ratio=3, overflow="ellipsis")
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for key in keys:
         key_value = key.get("key", "")
         if show_keys:
-            display_key = key_value
+            display_key = cell(key_value)
         else:
-            display_key = f"[dim]{_mask_key(key_value)}[/dim]"
+            display_key = cell(_mask_key(key_value), style="dim")
 
         table.add_row(
-            key.get("name", ""),
+            cell(key.get("name", ""), style="bold"),
             display_key,
-            key.get("_id", ""),
+            cell(key.get("_id", ""), style="dim"),
         )
 
     console.print(table)
+    render_pagination(result, page=page, page_size=page_size, count=len(keys), noun="API keys")
 
     if not show_keys:
         console.print()

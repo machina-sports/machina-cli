@@ -5,7 +5,7 @@ The `approvals` command group is the **human side of workflow checkpoints** — 
 ## Usage
 
 ```text
-machina approvals list    [--project <id>] [--all] [--json]
+machina approvals list    [--project <id>] [--all] [--page N] [--limit N] [--json]
 machina approvals approve <request-id> [--project <id>] [--json]
 machina approvals reject  <request-id> [--project <id>] [--json]
 ```
@@ -14,6 +14,8 @@ machina approvals reject  <request-id> [--project <id>] [--json]
 |------|---------|
 | `--project`, `-p` | A specific project (defaults to the selected project). |
 | `--all`, `-a` | (`list`) Include already-resolved requests. |
+| `--page` | (`list`) Page number. |
+| `--limit`, `-l` | (`list`) Requests per page (default: 50). |
 | `--json`, `-j` | Machine-readable output. |
 
 ## The flow
