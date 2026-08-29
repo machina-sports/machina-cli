@@ -96,7 +96,7 @@ def _update_python_package(version: str, force: bool) -> bool:
     command.append(f"machina-cli=={version}")
 
     console.print(f"  Updating Python package to v{version}...")
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
         console.print("  [red]Python package update failed.[/red]")
@@ -154,6 +154,7 @@ def _update_binary(version: str) -> bool:
             console.print(f"  [dim]Need sudo to install to {target.parent}[/dim]")
             result = subprocess.run(
                 ["sudo", "mv", str(temporary_path), str(target)],
+                check=False,
                 capture_output=True,
                 text=True,
             )
