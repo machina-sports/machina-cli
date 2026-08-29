@@ -2,14 +2,23 @@
 
 import httpx
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
+from machina_cli.ui import (
+    ACCENT,
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Organization management")
-console = Console()
 
 
 @app.command("list")
@@ -19,6 +28,7 @@ def list_orgs(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List your organizations."""
+    validate_pagination(page, page_size)
     client = MachinaClient()
     result = client.post(
         "user/organizations/search",
@@ -30,43 +40,37 @@ def list_orgs(
         },
     )
 
-    orgs = result.get("data", [])
+    orgs = extract_collection(result)
     default_org = get_config("default_organization_id")
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(orgs, default=str))
+        emit_json(orgs)
         return
 
     if not orgs:
-        console.print("[yellow]No organizations found.[/yellow]")
+        empty_state("organizations")
         return
 
-    table = Table(title="Organizations")
-    table.add_column("ID", style="dim")
-    table.add_column("Name")
-    table.add_column("Slug")
-    table.add_column("Status")
+    table = make_table("Organizations", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Slug", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
     table.add_column("Default", justify="center")
 
     for org in orgs:
         org_id = org.get("organization_id", org.get("_id", ""))
         is_default = "✦" if org_id == default_org else ""
         table.add_row(
-            org_id,
-            org.get("organization_name", org.get("name", "")),
-            org.get("organization_slug", org.get("slug", "")),
-            org.get("status", ""),
-            is_default,
+            cell(org.get("organization_name", org.get("name", "")), style="bold"),
+            cell(org.get("organization_slug", org.get("slug", "")), style="dim"),
+            status_cell(org.get("status", "")),
+            cell(org_id, style="dim"),
+            cell(is_default, style=f"bold {ACCENT}", empty=""),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(orgs)} of {total} organizations)[/dim]")
+    render_pagination(result, page=page, page_size=page_size, count=len(orgs), noun="organizations")
 
 
 @app.command()
@@ -121,7 +125,7 @@ def use(
                 "sorters": ["name", 1],
             },
         )
-        for org in result.get("data", []):
+        for org in extract_collection(result):
             if org.get("organization_id") == org_id:
                 name = org.get("organization_name", "")
                 if name:
@@ -407,45 +411,49 @@ def usage(
             "(usage export failed or timed out); totals and by-day above are exact."
         )
     elif len(by_project) > 1:
-        pt = Table(title="By project")
-        pt.add_column("Project", style="bold")
-        pt.add_column("Calls", justify="right", style="dim")
+        pt = make_table("By project", expand=True)
+        pt.add_column("Project", ratio=3, overflow="ellipsis")
+        pt.add_column("Calls", justify="right")
         pt.add_column("Total tokens", justify="right")
-        pt.add_column("%", justify="right", style="dim")
+        pt.add_column("%", justify="right")
         for pname, agg in sorted(by_project.items(), key=lambda kv: -kv[1]["total"]):
             pt.add_row(
-                pname,
-                f"{agg['count']:,}",
-                f"{agg['total']:,}",
-                f"{agg['total'] / grand_total * 100:.1f}%",
+                cell(pname, style="bold"),
+                cell(f"{agg['count']:,}", style="dim"),
+                cell(f"{agg['total']:,}"),
+                cell(f"{agg['total'] / grand_total * 100:.1f}%", style="dim"),
             )
         console.print(pt)
 
     if breakdown_available and by_agent:
-        at = Table(title=f"Top {top} agents")
-        at.add_column("Agent", style="bold")
-        at.add_column("Calls", justify="right", style="dim")
+        at = make_table(f"Top {top} agents", expand=True)
+        at.add_column("Agent", ratio=3, overflow="ellipsis")
+        at.add_column("Calls", justify="right")
         at.add_column("Total tokens", justify="right")
-        at.add_column("Avg/call", justify="right", style="dim")
-        at.add_column("%", justify="right", style="dim")
+        at.add_column("Avg/call", justify="right")
+        at.add_column("%", justify="right")
         for name, agg in sorted(by_agent.items(), key=lambda kv: -kv[1]["total"])[:top]:
             a_avg = agg["total"] / agg["count"] if agg["count"] else 0
             at.add_row(
-                name,
-                f"{agg['count']:,}",
-                f"{agg['total']:,}",
-                f"{a_avg:,.0f}",
-                f"{agg['total'] / grand_total * 100:.1f}%",
+                cell(name, style="bold"),
+                cell(f"{agg['count']:,}", style="dim"),
+                cell(f"{agg['total']:,}"),
+                cell(f"{a_avg:,.0f}", style="dim"),
+                cell(f"{agg['total'] / grand_total * 100:.1f}%", style="dim"),
             )
         console.print(at)
 
     if by_day:
-        dt = Table(title="By day")
-        dt.add_column("Day", style="bold")
-        dt.add_column("Calls", justify="right", style="dim")
+        dt = make_table("By day", expand=True)
+        dt.add_column("Day", ratio=3)
+        dt.add_column("Calls", justify="right")
         dt.add_column("Total tokens", justify="right")
         for day, agg in sorted(by_day.items()):
-            dt.add_row(day, f"{agg['count']:,}", f"{agg['total']:,}")
+            dt.add_row(
+                cell(day, style="bold"),
+                cell(f"{agg['count']:,}", style="dim"),
+                cell(f"{agg['total']:,}"),
+            )
         console.print(dt)
 
     if breakdown_available and has_unnamed:

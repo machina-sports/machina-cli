@@ -30,10 +30,10 @@ credentials list json      # same as: machina credentials list --json
 
 ## Features
 
-- **Tab completion** — across command groups, subcommands, and flags.
+- **Tab completion** — across command groups, subcommands, and common flags.
 - **Command history** — persisted in `~/.machina/history`, available across sessions.
 - **Live context** — your current organization and project show in the prompt.
-- **`help`** — lists every command group; `exit` or `Ctrl+D` quits.
+- **`help`** — lists every command group; `help workflow` opens contextual help; `exit` or `Ctrl+D` quits.
 
 ::: tip
 The REPL is the default when you run `machina`, and it opens automatically after `machina login`. For the static banner instead of a session, run `machina --no-interactive`.

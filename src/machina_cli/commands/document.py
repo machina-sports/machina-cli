@@ -1,14 +1,22 @@
 """Document management commands."""
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Document management")
-console = Console()
 
 
 @app.command("list")
@@ -19,6 +27,7 @@ def list_documents(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List documents in the current project."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "document/search",
@@ -30,40 +39,34 @@ def list_documents(
         },
     )
 
-    items = result.get("data", [])
+    items = extract_collection(result)
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(items, default=str))
+        emit_json(items)
         return
 
     if not items:
-        console.print("[yellow]No documents found.[/yellow]")
+        empty_state("documents")
         return
 
-    table = Table(title="Documents")
-    table.add_column("Name", style="bold")
-    table.add_column("Type", style="dim")
-    table.add_column("Status")
-    table.add_column("ID", style="dim")
+    table = make_table("Documents", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Type", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for item in items:
-        status = item.get("status", "")
-        color = "green" if status == "active" else "dim"
         table.add_row(
-            item.get("name", item.get("title", "")),
-            item.get("type", item.get("document_type", item.get("filetype", ""))),
-            f"[{color}]{status}[/{color}]",
-            item.get("_id", ""),
+            cell(item.get("name", item.get("title", "")), style="bold"),
+            cell(
+                item.get("type", item.get("document_type", item.get("filetype", ""))), style="dim"
+            ),
+            status_cell(item.get("status", "")),
+            cell(item.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(items)} of {total} documents)[/dim]")
+    render_pagination(result, page=page, page_size=page_size, count=len(items), noun="documents")
 
 
 @app.command("get")

@@ -1,15 +1,24 @@
 """Project management commands."""
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
+from machina_cli.ui import (
+    ACCENT,
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Project management")
-console = Console()
 
 
 @app.command("list")
@@ -19,6 +28,7 @@ def list_projects(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List your projects."""
+    validate_pagination(page, page_size)
     client = MachinaClient()
     result = client.post(
         "user/projects/search",
@@ -30,45 +40,39 @@ def list_projects(
         },
     )
 
-    projects = result.get("data", [])
+    projects = extract_collection(result)
     default_project = get_config("default_project_id")
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(projects, default=str))
+        emit_json(projects)
         return
 
     if not projects:
-        console.print("[yellow]No projects found.[/yellow]")
+        empty_state("projects")
         return
 
-    table = Table(title="Projects")
-    table.add_column("ID", style="dim")
-    table.add_column("Name")
-    table.add_column("Slug")
-    table.add_column("Organization", style="dim")
-    table.add_column("Status")
+    table = make_table("Projects", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Slug", ratio=2, overflow="ellipsis")
+    table.add_column("Organization", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
     table.add_column("Default", justify="center")
 
     for proj in projects:
         proj_id = proj.get("project_id", proj.get("_id", ""))
         is_default = "✦" if proj_id == default_project else ""
         table.add_row(
-            proj_id,
-            proj.get("project_name", proj.get("name", "")),
-            proj.get("project_slug", proj.get("slug", "")),
-            proj.get("organization_id", ""),
-            proj.get("status", ""),
-            is_default,
+            cell(proj.get("project_name", proj.get("name", "")), style="bold"),
+            cell(proj.get("project_slug", proj.get("slug", "")), style="dim"),
+            cell(proj.get("organization_id", ""), style="dim"),
+            status_cell(proj.get("status", "")),
+            cell(proj_id, style="dim"),
+            cell(is_default, style=f"bold {ACCENT}", empty=""),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(projects)} of {total} projects)[/dim]")
+    render_pagination(result, page=page, page_size=page_size, count=len(projects), noun="projects")
 
 
 @app.command()
@@ -133,7 +137,7 @@ def use(
                 "sorters": ["name", 1],
             },
         )
-        for proj in result.get("data", []):
+        for proj in extract_collection(result):
             if proj.get("project_id") == project_id:
                 name = proj.get("project_name", "")
                 if name:

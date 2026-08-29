@@ -1,15 +1,23 @@
 """Execution management commands."""
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Execution management")
-console = Console()
 
 
 @app.command("get")
@@ -91,32 +99,25 @@ def get_execution(
     # Workflow list (if not compact)
     workflows = data.get("workflows", [])
     if workflows and not compact:
-        table = Table(title=f"Workflows ({len(workflows)})")
-        table.add_column("#", style="dim", width=3)
-        table.add_column("Name", style="bold")
-        table.add_column("Status")
-        table.add_column("Time", style="dim")
-        table.add_column("ID", style="dim")
+        table = make_table(f"Workflows ({len(workflows)})", expand=True)
+        table.add_column("#", width=3)
+        table.add_column("Name", ratio=2, overflow="ellipsis")
+        table.add_column("Status", no_wrap=True)
+        table.add_column("Time", justify="right", no_wrap=True)
+        table.add_column("ID", ratio=2, overflow="ellipsis")
 
         for idx, wf in enumerate(workflows):
             if not isinstance(wf, dict):
                 continue
             wf_status = wf.get("status", "")
-            wf_color = (
-                "green"
-                if wf_status in ("completed", "success")
-                else "red"
-                if "fail" in wf_status
-                else "yellow"
-            )
             wf_time = wf.get("execution_time")
             wf_time_str = f"{wf_time:.1f}s" if isinstance(wf_time, (int, float)) else ""
             table.add_row(
-                str(idx + 1),
-                wf.get("name", ""),
-                f"[{wf_color}]{wf_status}[/{wf_color}]",
-                wf_time_str,
-                wf.get("_id", ""),
+                cell(idx + 1, style="dim"),
+                cell(wf.get("name", ""), style="bold"),
+                status_cell(wf_status),
+                cell(wf_time_str, style="dim"),
+                cell(wf.get("_id", ""), style="dim"),
             )
         console.print(table)
 
@@ -129,6 +130,7 @@ def list_executions(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List recent agent executions."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "execution/agent-search",
@@ -140,50 +142,39 @@ def list_executions(
         },
     )
 
-    executions = result.get("data", [])
+    executions = extract_collection(result)
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(executions, default=str))
+        emit_json(executions)
         return
 
     if not executions:
-        console.print("[yellow]No executions found.[/yellow]")
+        empty_state("executions")
         return
 
-    table = Table(title="Executions")
-    table.add_column("ID", style="dim")
-    table.add_column("Name", style="bold")
-    table.add_column("Status")
-    table.add_column("Time", style="dim")
-    table.add_column("Workflows", justify="right", style="dim")
+    table = make_table("Executions", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Time", justify="right", no_wrap=True)
+    table.add_column("Workflows", justify="right", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for ex in executions:
         status = ex.get("status", "")
-        color = (
-            "green"
-            if status in ("agent-executed", "completed", "success")
-            else "red"
-            if "fail" in status
-            else "yellow"
-        )
         exec_time = ex.get("execution_time")
         time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else ""
         total_wf = ex.get("total_workflows")
         completed_wf = ex.get("completed_workflows")
         wf_str = f"{completed_wf}/{total_wf}" if total_wf else ""
         table.add_row(
-            ex.get("_id", ""),
-            ex.get("name", ""),
-            f"[{color}]{status}[/{color}]",
-            time_str,
-            wf_str,
+            cell(ex.get("name", ""), style="bold"),
+            status_cell(status),
+            cell(time_str, style="dim"),
+            cell(wf_str, style="dim"),
+            cell(ex.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(executions)} of {total} executions)[/dim]")
+    render_pagination(
+        result, page=page, page_size=page_size, count=len(executions), noun="executions"
+    )

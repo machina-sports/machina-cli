@@ -5,14 +5,22 @@ import sys
 import time
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    cell,
+    console,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Workflow management")
-console = Console()
 
 
 @app.command("list")
@@ -23,6 +31,7 @@ def list_workflows(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List workflows in the current project."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "workflow/search",
@@ -34,38 +43,34 @@ def list_workflows(
         },
     )
 
-    workflows = result.get("data", [])
+    workflows = extract_collection(result)
 
     if json_output:
-        console.print_json(json_lib.dumps(workflows, default=str))
+        emit_json(workflows)
         return
 
     if not workflows:
-        console.print("[yellow]No workflows found.[/yellow]")
+        empty_state("workflows")
         return
 
-    table = Table(title="Workflows")
-    table.add_column("Name", style="bold")
-    table.add_column("Slug", style="dim")
-    table.add_column("Status")
-    table.add_column("ID", style="dim")
+    table = make_table("Workflows", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Slug", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for wf in workflows:
-        status = wf.get("status", "")
-        color = "green" if status == "active" else "yellow" if status == "draft" else "dim"
         table.add_row(
-            wf.get("name", ""),
-            wf.get("slug", ""),
-            f"[{color}]{status}[/{color}]",
-            wf.get("_id", ""),
+            cell(wf.get("name", ""), style="bold"),
+            cell(wf.get("slug", ""), style="dim"),
+            status_cell(wf.get("status", "")),
+            cell(wf.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(workflows)} of {total} workflows)[/dim]")
+    render_pagination(
+        result, page=page, page_size=page_size, count=len(workflows), noun="workflows"
+    )
 
 
 @app.command("get")

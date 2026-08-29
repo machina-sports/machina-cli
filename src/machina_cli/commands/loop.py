@@ -11,12 +11,11 @@ See docs/agentic-harness-loop.md for the architecture.
 import time
 
 import typer
-from rich.console import Console
 
 from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
+from machina_cli.ui import cell, console, make_table, status_cell
 
 app = typer.Typer(help="Durable agentic turn loop (harness)")
-console = Console()
 
 # `idle` = the turn was answered, verified, and awaiting the next user message
 # (continue it with `machina loop say`). `needs_review` = the turn finished but
@@ -181,10 +180,16 @@ def sessions(
     if not rows:
         console.print("[dim]No sessions yet.[/]")
         return
+    table = make_table("Loop sessions", expand=True)
+    table.add_column("Session", ratio=3, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Turn", justify="right", no_wrap=True)
+    table.add_column("Persona", ratio=2, overflow="ellipsis")
     for s in rows:
-        status = s.get("status", "?")
-        console.print(
-            f"{s.get('session_id', '?'):32} "
-            f"[bold]{status:10}[/] turn={s.get('turn', 0):<3} "
-            f"[dim]{s.get('persona_agent', '')}[/]"
+        table.add_row(
+            cell(s.get("session_id", "?"), style="bold"),
+            status_cell(s.get("status", "?")),
+            cell(s.get("turn", 0), style="dim"),
+            cell(s.get("persona_agent", ""), style="dim"),
         )
+    console.print(table)

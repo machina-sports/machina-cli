@@ -5,15 +5,25 @@ import sys
 import time
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.tree import Tree
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    bool_cell,
+    cell,
+    console,
+    datetime_cell,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Agent management")
-console = Console()
 
 
 @app.command("list")
@@ -24,6 +34,7 @@ def list_agents(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List agents in the current project."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "agent/search",
@@ -35,47 +46,36 @@ def list_agents(
         },
     )
 
-    agents = result.get("data", [])
+    agents = extract_collection(result)
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(agents, default=str))
+        emit_json(agents)
         return
 
     if not agents:
-        console.print("[yellow]No agents found.[/yellow]")
+        empty_state("agents")
         return
 
-    table = Table(title="Agents")
-    table.add_column("Name", style="bold")
-    table.add_column("Title")
-    table.add_column("Status")
+    table = make_table("Agents", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Title", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
     table.add_column("Scheduled", justify="center")
-    table.add_column("Last Execution", style="dim")
-    table.add_column("ID", style="dim")
+    table.add_column("Last Execution", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for agent in agents:
-        status = agent.get("status", "")
-        color = "green" if status == "active" else "yellow" if status == "inactive" else "dim"
-        scheduled = "yes" if agent.get("scheduled") else "no"
-        sched_color = "green" if agent.get("scheduled") else "dim"
-        last_exec = str(agent.get("last_execution", ""))[:19]
         table.add_row(
-            agent.get("name", ""),
-            agent.get("title", ""),
-            f"[{color}]{status}[/{color}]",
-            f"[{sched_color}]{scheduled}[/{sched_color}]",
-            last_exec,
-            agent.get("_id", ""),
+            cell(agent.get("name", ""), style="bold"),
+            cell(agent.get("title", "")),
+            status_cell(agent.get("status", "")),
+            bool_cell(agent.get("scheduled")),
+            datetime_cell(agent.get("last_execution", "")),
+            cell(agent.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(agents)} of {total} agents)[/dim]")
+    render_pagination(result, page=page, page_size=page_size, count=len(agents), noun="agents")
 
 
 @app.command("get")
@@ -132,11 +132,11 @@ def get_agent(
     # Workflows
     workflows = agent.get("workflows", [])
     if workflows:
-        table = Table(title=f"Workflows ({len(workflows)})")
-        table.add_column("#", style="dim", width=3)
-        table.add_column("Name", style="bold")
-        table.add_column("Description")
-        table.add_column("Condition", style="dim")
+        table = make_table(f"Workflows ({len(workflows)})", expand=True)
+        table.add_column("#", width=3)
+        table.add_column("Name", ratio=2, overflow="ellipsis")
+        table.add_column("Description", ratio=3, overflow="fold")
+        table.add_column("Condition", ratio=2, overflow="fold")
 
         for idx, wf in enumerate(workflows):
             if not isinstance(wf, dict):
@@ -144,10 +144,10 @@ def get_agent(
             condition = wf.get("condition", "")
             cond_display = condition[:50] + "..." if len(condition) > 50 else condition
             table.add_row(
-                str(idx + 1),
-                wf.get("name", ""),
-                wf.get("description", "")[:60],
-                cond_display,
+                cell(idx + 1, style="dim"),
+                cell(wf.get("name", ""), style="bold"),
+                cell(wf.get("description", "")[:60]),
+                cell(cond_display, style="dim"),
             )
         console.print(table)
 
@@ -369,6 +369,7 @@ def list_executions(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List recent agent executions."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
     result = client.post(
         "execution/agent-search",
@@ -380,52 +381,41 @@ def list_executions(
         },
     )
 
-    executions = result.get("data", [])
+    executions = extract_collection(result)
 
     if json_output:
-        import json
-
-        console.print_json(json.dumps(executions, default=str))
+        emit_json(executions)
         return
 
     if not executions:
-        console.print("[yellow]No executions found.[/yellow]")
+        empty_state("executions")
         return
 
-    table = Table(title="Agent Executions")
-    table.add_column("Name", style="bold")
-    table.add_column("Status")
-    table.add_column("Time", style="dim")
-    table.add_column("Workflows", justify="right", style="dim")
-    table.add_column("Created", style="dim")
-    table.add_column("ID", style="dim")
+    table = make_table("Agent executions", expand=True)
+    table.add_column("Name", ratio=2, overflow="ellipsis")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Time", justify="right", no_wrap=True)
+    table.add_column("Workflows", justify="right", no_wrap=True)
+    table.add_column("Created", no_wrap=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
 
     for ex in executions:
         status = ex.get("status", "")
-        color = (
-            "green"
-            if status in ("agent-executed", "completed", "success")
-            else "red"
-            if "fail" in status
-            else "yellow"
-        )
         exec_time = ex.get("execution_time")
         time_str = f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else ""
         total_wf = ex.get("total_workflows")
         completed_wf = ex.get("completed_workflows")
         wf_str = f"{completed_wf}/{total_wf}" if total_wf else ""
         table.add_row(
-            ex.get("name", ""),
-            f"[{color}]{status}[/{color}]",
-            time_str,
-            wf_str,
-            str(ex.get("date", ex.get("created", "")))[:19],
-            ex.get("_id", ""),
+            cell(ex.get("name", ""), style="bold"),
+            status_cell(status),
+            cell(time_str, style="dim"),
+            cell(wf_str, style="dim"),
+            datetime_cell(ex.get("date", ex.get("created", ""))),
+            cell(ex.get("_id", ""), style="dim"),
         )
 
     console.print(table)
-
-    pagination = result.get("pagination", {})
-    total = pagination.get("total", pagination.get("total_documents", 0))
-    if total:
-        console.print(f"\n  [dim]Page {page} ({len(executions)} of {total} executions)[/dim]")
+    render_pagination(
+        result, page=page, page_size=page_size, count=len(executions), noun="executions"
+    )

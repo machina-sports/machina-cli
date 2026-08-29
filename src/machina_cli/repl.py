@@ -11,55 +11,15 @@ import shlex
 from rich.console import Console
 from rich.text import Text
 
+from machina_cli.catalog import REPL_COMMANDS, SUB_COMMANDS, print_command_catalog
 from machina_cli.config import get_config, resolve_auth_token
 
-console = Console()
+console = Console(highlight=False)
 
-# Commands available in the REPL (maps to typer subcommands)
-REPL_COMMANDS = [
-    "org",
-    "project",
-    "workflow",
-    "agent",
-    "connector",
-    "mapping",
-    "prompt",
-    "document",
-    "skills",
-    "sports",
-    "loop",
-    "factory",
-    "template",
-    "execution",
-    "approvals",
-    "credentials",
-    "deploy",
-    "config",
-    "auth",
-    "mcp",
-    "connect",
-    "login",
-    "update",
-    "version",
-    "help",
-    "exit",
-    "quit",
-    "clear",
-]
-
-# Sub-commands for tab completion
+# Dynamic passthroughs and less-common commands are kept out of the compact
+# catalog, but remain discoverable through tab completion.
 SUB_COMMANDS = {
-    "org": ["list", "create", "use"],
-    "project": ["list", "create", "use", "status"],
-    "workflow": ["list", "get", "run"],
-    "agent": ["list", "get", "run", "executions"],
-    "connector": ["list", "get"],
-    "mapping": ["list", "get"],
-    "prompt": ["list", "get"],
-    "document": ["list", "get"],
-    "skills": ["list", "install", "info", "run", "push", "constructor"],
-    # `sports` is a dynamic passthrough to sports-skills; tab completion only
-    # offers the currently-registered top-level modules.
+    **SUB_COMMANDS,
     "sports": [
         "football",
         "f1",
@@ -81,7 +41,6 @@ SUB_COMMANDS = {
         "news",
         "catalog",
     ],
-    "loop": ["run", "watch", "say", "stop", "sessions"],
     "factory": [
         "run",
         "status",
@@ -93,33 +52,44 @@ SUB_COMMANDS = {
         "list",
         "whoami",
     ],
-    "template": ["list", "install", "push"],
-    "execution": ["get", "list"],
-    "approvals": ["list", "approve", "reject"],
-    "credentials": ["list", "generate", "revoke"],
-    "deploy": ["start", "status", "restart"],
-    "config": ["list", "set", "get"],
-    "auth": ["login", "logout", "whoami"],
-    "mcp": ["url"],
 }
+
+_COMMON_FLAGS = ["--help"]
+_LIST_FLAGS = ["--limit", "--page", "--json", "--project", "--org"]
+_TOP_LEVEL_FLAGS = {
+    "connect": ["--json", "--reveal", "--probe", "--name", "--mint", "--org"],
+    "login": ["--api-key", "--with-credentials"],
+    "update": ["--check", "--force"],
+}
+
+
+def _completion_options(line: str, text: str) -> list[str]:
+    """Return context-aware completions for the current REPL input."""
+    parts = line.split()
+    trailing_space = line.endswith(" ")
+
+    if not parts or (len(parts) == 1 and not trailing_space):
+        return [f"{name} " for name in REPL_COMMANDS if name.startswith(text)]
+
+    command = parts[0]
+    if command in SUB_COMMANDS and (len(parts) == 1 or (len(parts) == 2 and not trailing_space)):
+        prefix = "" if len(parts) == 1 else parts[1]
+        return [f"{name} " for name in SUB_COMMANDS[command] if name.startswith(prefix)]
+
+    action = parts[1] if command in SUB_COMMANDS and len(parts) > 1 else ""
+    flags = list(_COMMON_FLAGS)
+    if action in {"list", "executions"}:
+        flags.extend(_LIST_FLAGS)
+    elif action == "sessions":
+        flags.append("--limit")
+    flags.extend(_TOP_LEVEL_FLAGS.get(command, []))
+    return [f"{flag} " for flag in dict.fromkeys(flags) if flag.startswith(text)]
 
 
 def _completer(text, state):
     """Tab completion for REPL commands."""
     line = readline.get_line_buffer()
-    parts = line.split()
-
-    if len(parts) <= 1:
-        # Complete top-level commands
-        options = [c + " " for c in REPL_COMMANDS + list(SUB_COMMANDS.keys()) if c.startswith(text)]
-    elif len(parts) == 2 or (len(parts) == 1 and line.endswith(" ")):
-        # Complete sub-commands
-        cmd = parts[0]
-        sub_text = parts[1] if len(parts) > 1 else ""
-        subs = SUB_COMMANDS.get(cmd, [])
-        options = [s + " " for s in subs if s.startswith(sub_text)]
-    else:
-        options = []
+    options = _completion_options(line, text)
 
     return options[state] if state < len(options) else None
 
@@ -179,60 +149,8 @@ def _show_repl_banner():
 
 def _show_help():
     """Show REPL help."""
-    groups = [
-        (
-            "Platform",
-            [
-                ("org list|create|use", "Organizations"),
-                ("project list|create|use|status", "Projects"),
-                ("credentials list|generate|revoke", "API keys"),
-                ("auth login|logout|whoami", "Authentication"),
-                ("connect [project] --mint", "Wire an agent to a project's MCP"),
-            ],
-        ),
-        (
-            "Resources",
-            [
-                ("workflow list|get|run <name>", "Workflows"),
-                ("agent list|get|run <name>", "Agents"),
-                ("connector list|get <name>", "Connectors"),
-                ("mapping list|get <name>", "Mappings"),
-                ("prompt list|get <name>", "Prompts"),
-                ("document list|get <id>", "Documents"),
-            ],
-        ),
-        (
-            "Operations",
-            [
-                ("execution list|get <id>", "Execution history"),
-                ("approvals list|approve|reject <id>", "Human approval checkpoints"),
-                ("skills list|install|info|run|push|constructor", "Skills-first surface"),
-                ("factory run|status|watch|logs|list", "Build apps (Factory coding-agent)"),
-                ("sports <module> <command>", "Sports-skills passthrough"),
-                ("template list|install|push", "Template compatibility surface"),
-                ("deploy start|status|restart", "Deployments"),
-                ("config list|set|get", "Configuration"),
-                ("mcp url [project]", "Resolve MCP endpoint"),
-            ],
-        ),
-        (
-            "Session",
-            [
-                ("login", "Authenticate (browser)"),
-                ("update", "Self-update the CLI"),
-                ("version", "Show CLI version"),
-                ("clear", "Clear screen"),
-                ("exit", "Exit session"),
-            ],
-        ),
-    ]
     console.print()
-    for group_name, cmds in groups:
-        console.print(f"  [bold underline]{group_name}[/bold underline]")
-        for cmd, desc in cmds:
-            console.print(f"    [bold #FF5C1F]{cmd:<38}[/bold #FF5C1F] [dim]{desc}[/dim]")
-        console.print()
-    console.print("  [dim]All list commands support:[/dim] --limit N  --page N  --json")
+    print_command_catalog(console)
     console.print()
 
 
@@ -252,9 +170,12 @@ def _dispatch(line: str):
     if cmd in ("exit", "quit"):
         raise EOFError()
 
-    if cmd in ("help", "--help", "-h"):
-        _show_help()
-        return
+    if cmd in ("help", "?", "--help", "-h"):
+        if len(args) == 1:
+            _show_help()
+            return
+        args = [*args[1:], "--help"]
+        cmd = args[0].lower()
 
     if cmd == "clear":
         os.system("clear" if os.name != "nt" else "cls")
@@ -297,9 +218,27 @@ def _dispatch(line: str):
         "password",
         "slug",
         "level",
+        "project",
+        "org",
+        "all",
+        "reveal",
+        "probe",
+        "follow",
+        "check",
+        "mode",
+        "month",
+        "last-month",
+        "from",
+        "to",
+        "top",
+        "days",
+        "timeout",
+        "persona",
+        "model",
+        "budget",
     }
     # Find where flags start (skip command words like "project list", "workflow get")
-    flag_start = min(2, len(args))
+    flag_start = min(2 if args[0] in SUB_COMMANDS else 1, len(args))
     fixed_args = list(args[:flag_start])
     for arg in args[flag_start:]:
         if arg.lower() in KNOWN_FLAGS and not arg.startswith("-"):

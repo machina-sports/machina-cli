@@ -11,16 +11,27 @@ import getpass
 import json as json_lib
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.ui import (
+    cell,
+    console,
+    datetime_cell,
+    emit_json,
+    empty_state,
+    extract_collection,
+    make_table,
+    render_pagination,
+    status_cell,
+    validate_pagination,
+)
 
 app = typer.Typer(help="Human approvals (list / approve / reject workflow checkpoints)")
-console = Console()
 
 
-def _requests(client: ProjectClient, show_all: bool) -> list:
+def _requests(
+    client: ProjectClient, show_all: bool, page: int, page_size: int
+) -> tuple[list, dict]:
     filters = {"name": "approval-request"}
     if not show_all:
         filters["value.status"] = "pending"
@@ -29,13 +40,12 @@ def _requests(client: ProjectClient, show_all: bool) -> list:
         {
             "compact": False,
             "filters": filters,
-            "page": 1,
-            "page_size": 50,
+            "page": page,
+            "page_size": page_size,
             "sorters": ["created", -1],
         },
     )
-    d = r.get("data")
-    return (d.get("data") if isinstance(d, dict) else d) or []
+    return extract_collection(r), r
 
 
 @app.command("list")
@@ -44,11 +54,14 @@ def list_approvals(
         None, "--project", "-p", help="Project ID (default: selected project)"
     ),
     show_all: bool = typer.Option(False, "--all", "-a", help="Include already-resolved requests"),
+    page: int = typer.Option(1, "--page", help="Page number"),
+    page_size: int = typer.Option(50, "--limit", "-l", help="Items per page"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List approval requests waiting for a human (default: pending only)."""
+    validate_pagination(page, page_size)
     client = ProjectClient(project_id)
-    rows = _requests(client, show_all)
+    rows, result = _requests(client, show_all, page, page_size)
 
     if json_output:
         payload = [
@@ -62,35 +75,35 @@ def list_approvals(
             }
             for r in rows
         ]
-        console.print_json(json_lib.dumps(payload, default=str))
+        emit_json(payload)
         return
 
     if not rows:
-        console.print(
-            "[green]No pending approvals.[/green]"
-            if not show_all
-            else "[yellow]No approval requests found.[/yellow]"
+        empty_state("pending approvals", positive=True) if not show_all else empty_state(
+            "approval requests"
         )
         return
-    table = Table(title="Approval requests" + ("" if show_all else " — pending"))
-    table.add_column("Request", style="bold")
-    table.add_column("Title", overflow="fold")
-    table.add_column("Status")
-    table.add_column("On approve, runs", style="dim")
-    table.add_column("Requested", style="dim", no_wrap=True)
+    table = make_table("Approval requests" + ("" if show_all else " — pending"), expand=True)
+    table.add_column("Request", ratio=2, overflow="ellipsis")
+    table.add_column("Title", ratio=3, overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("On approve, runs", ratio=2, overflow="ellipsis")
+    table.add_column("Requested", no_wrap=True)
     for r in rows:
         v = r.get("value") or {}
         status = v.get("status", "?")
-        color = {"pending": "yellow", "approved": "green", "rejected": "red"}.get(status, "dim")
         table.add_row(
-            v.get("request_id", "?"),
-            v.get("title", ""),
-            f"[{color}]{status}[/]",
-            (v.get("action") or {}).get("workflow") or "—",
-            str(v.get("requested_at") or r.get("created") or "")[:16],
+            cell(v.get("request_id", "?"), style="bold"),
+            cell(v.get("title", "")),
+            status_cell(status),
+            cell((v.get("action") or {}).get("workflow"), style="dim"),
+            datetime_cell(v.get("requested_at") or r.get("created")),
         )
     console.print(table)
     console.print("  [dim]Resolve with[/] [bold]machina approvals approve|reject <request-id>[/]")
+    render_pagination(
+        result, page=page, page_size=page_size, count=len(rows), noun="approval requests"
+    )
 
 
 def _resolve(request_id: str, decision: str, project_id: str | None, json_output: bool) -> None:

@@ -16,14 +16,12 @@ import json as json_lib
 import time
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from machina_cli.factory_client import FactoryClient
+from machina_cli.ui import cell, console, datetime_cell, make_table, status_cell
 
 app = typer.Typer(help="Trigger Factory coding-agent jobs")
-console = Console()
 
 # Job lifecycle states (machina-factory-customers jobStatusEnum).
 ACTIVE_STATUSES = {
@@ -271,33 +269,33 @@ def list_jobs(
         return
 
     if active:
-        table = Table(title="Active builds")
-        table.add_column("ID", style="dim")
-        table.add_column("Repo")
-        table.add_column("Task")
-        table.add_column("Status")
+        table = make_table("Active builds", expand=True)
+        table.add_column("Repo", ratio=2, overflow="ellipsis")
+        table.add_column("Task", ratio=3, overflow="fold")
+        table.add_column("Status", no_wrap=True)
+        table.add_column("ID", ratio=2, overflow="ellipsis")
         for j in active:
             st = j.get("status", "")
             table.add_row(
-                j.get("id", ""),
-                j.get("repo", ""),
-                j.get("task", ""),
-                f"[{_status_color(st)}]{st}[/{_status_color(st)}]",
+                cell(j.get("repo", ""), style="bold"),
+                cell(j.get("task", "")),
+                status_cell(st),
+                cell(j.get("id", ""), style="dim"),
             )
         console.print(table)
 
     if recent:
-        table = Table(title="Recent builds")
-        table.add_column("ID", style="dim")
-        table.add_column("Repo")
-        table.add_column("Task")
-        table.add_column("Completed", style="dim")
+        table = make_table("Recent builds", expand=True)
+        table.add_column("Repo", ratio=2, overflow="ellipsis")
+        table.add_column("Task", ratio=3, overflow="fold")
+        table.add_column("Completed", no_wrap=True)
+        table.add_column("ID", ratio=2, overflow="ellipsis")
         for j in recent:
             table.add_row(
-                j.get("id", ""),
-                j.get("repo", ""),
-                j.get("task", ""),
-                str(j.get("completedAt", "") or ""),
+                cell(j.get("repo", ""), style="bold"),
+                cell(j.get("task", "")),
+                datetime_cell(j.get("completedAt")),
+                cell(j.get("id", ""), style="dim"),
             )
         console.print(table)
 
@@ -351,19 +349,19 @@ def _render_chain(chain: dict):
             seen.add(nid)
             nodes.append(node)
 
-    table = Table(title=f"Job chain · root {root.get('id', '')}")
-    table.add_column("ID", style="dim")
-    table.add_column("Origin")
-    table.add_column("Task")
-    table.add_column("Status")
+    table = make_table(f"Job chain · root {root.get('id', '')}", expand=True)
+    table.add_column("ID", ratio=2, overflow="ellipsis")
+    table.add_column("Origin", ratio=2, overflow="ellipsis")
+    table.add_column("Task", ratio=3, overflow="fold")
+    table.add_column("Status", no_wrap=True)
     for node in nodes:
         st = node.get("status", "")
-        marker = " [#FF5C1F]●[/#FF5C1F]" if node.get("id") == current.get("id") else ""
+        marker = " ●" if node.get("id") == current.get("id") else ""
         table.add_row(
-            (node.get("id", "") or "")[:18] + marker,
-            node.get("origin", ""),
-            (node.get("task", "") or "")[:60],
-            f"[{_status_color(st)}]{st}[/{_status_color(st)}]",
+            cell((node.get("id", "") or "")[:18] + marker, style="dim"),
+            cell(node.get("origin", "")),
+            cell((node.get("task", "") or "")[:60]),
+            status_cell(st),
         )
     console.print(table)
 

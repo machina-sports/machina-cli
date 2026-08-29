@@ -8,6 +8,7 @@ Manage the API keys attached to your project. Keys authenticate headless / CI us
 machina credentials list                      # list API keys (masked)
 machina credentials list --show-keys          # list API keys (full values)
 machina credentials list --copy client-api    # copy a key to the clipboard
+machina credentials list --page 2 --limit 25  # paginate keys
 machina credentials generate                  # generate a new API key
 machina credentials generate --name my-key    # generate with a custom name
 machina credentials revoke <key-id>           # revoke an API key

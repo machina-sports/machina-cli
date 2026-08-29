@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 from machina_cli import __version__
+from machina_cli.catalog import CLI_SESSION_COMMANDS, command_catalog
 from machina_cli.commands import (
     agent,
     approvals,
@@ -34,47 +35,7 @@ from machina_cli.commands import (
 )
 from machina_cli.commands.auth import do_login
 
-console = Console()
-
-CMD_GROUPS = [
-    (
-        "Platform",
-        [
-            ("create", "Scaffold deployable apps"),
-            ("login", "Authenticate"),
-            ("org", "Organizations"),
-            ("project", "Projects"),
-            ("credentials", "API keys"),
-            ("connect", "Connect an agent to a project's MCP"),
-        ],
-    ),
-    (
-        "Resources",
-        [
-            ("workflow", "Workflows"),
-            ("agent", "Agents"),
-            ("connector", "Connectors"),
-            ("mapping", "Mappings"),
-            ("prompt", "Prompts"),
-            ("document", "Documents"),
-        ],
-    ),
-    (
-        "Operations",
-        [
-            ("execution", "Executions"),
-            ("approvals", "Human approvals"),
-            ("skills", "Skills"),
-            ("loop", "Agentic turn loop (harness)"),
-            ("factory", "Build apps (Factory)"),
-            ("sports", "Sports-skills passthrough"),
-            ("template", "Templates (compat)"),
-            ("deploy", "Deployments"),
-            ("mcp", "MCP connection"),
-            ("update", "Self-update"),
-        ],
-    ),
-]
+console = Console(highlight=False)
 
 
 def get_version() -> str:
@@ -111,18 +72,10 @@ def build_wordmark() -> Panel:
 
 
 def build_commands_panel() -> Panel:
-    lines = Text()
-    for gi, (group_name, cmds) in enumerate(CMD_GROUPS):
-        lines.append(f"{group_name}\n", style="bold underline")
-        for name, desc in cmds:
-            lines.append(f"  {name:<14}", style="bold #FF5C1F")
-            lines.append(f"{desc}\n", style="dim")
-        if gi < len(CMD_GROUPS) - 1:
-            lines.append("\n")
     return Panel(
-        lines,
+        command_catalog(session_commands=CLI_SESSION_COMMANDS),
         border_style="#FF5C1F",
-        expand=False,
+        expand=True,
         padding=(1, 1),
     )
 
@@ -131,13 +84,16 @@ def show_banner():
     wordmark = build_wordmark()
     commands = build_commands_panel()
 
-    layout = Table(show_header=False, show_edge=False, box=None, padding=(0, 1))
-    layout.add_column(no_wrap=True)
-    layout.add_column(no_wrap=True)
-    layout.add_row(wordmark, commands)
-
     console.print()
-    console.print(layout)
+    if console.width >= 110:
+        layout = Table(show_header=False, show_edge=False, box=None, padding=(0, 1), expand=True)
+        layout.add_column(width=34, no_wrap=True)
+        layout.add_column(ratio=1)
+        layout.add_row(wordmark, commands)
+        console.print(layout)
+    else:
+        console.print(wordmark)
+        console.print(commands)
     console.print()
     console.print(
         "  [dim]Run[/] [bold]machina[/] [bold magenta]<command>[/] [bold]--help[/] [dim]for more info[/]"
@@ -170,29 +126,73 @@ def main(
 
 
 # Register sub-commands
-app.add_typer(auth.app, name="auth", help="Authentication (login, logout, whoami)")
-app.add_typer(create.app, name="create", help="Scaffold deployable Machina apps")
-app.add_typer(org.app, name="org", help="Organization management")
-app.add_typer(project.app, name="project", help="Project management")
-app.add_typer(workflow.app, name="workflow", help="Workflow management")
-app.add_typer(agent.app, name="agent", help="Agent management")
-app.add_typer(template.app, name="template", help="Template management")
-app.add_typer(skills.app, name="skills", help="Skills management")
-app.add_typer(execution.app, name="execution", help="Execution management")
-app.add_typer(approvals.app, name="approvals", help="Human approvals (workflow checkpoints)")
-app.add_typer(loop.app, name="loop", help="Durable agentic turn loop (harness)")
 app.add_typer(
-    context_graph.app, name="context-graph", help="Self-healing / monitoring status across projects"
+    auth.app, name="auth", help="Authentication (login, logout, whoami)", rich_help_panel="Platform"
 )
-app.add_typer(factory.app, name="factory", help="Trigger Factory coding-agent builds")
-app.add_typer(connector.app, name="connector", help="Connector management")
-app.add_typer(mapping.app, name="mapping", help="Mapping management")
-app.add_typer(prompt.app, name="prompt", help="Prompt management")
-app.add_typer(document.app, name="document", help="Document management")
-app.add_typer(credentials.app, name="credentials", help="API key management")
-app.add_typer(deploy.app, name="deploy", help="Deployment management")
-app.add_typer(config_cmd.app, name="config", help="Configuration management")
-app.add_typer(mcp.app, name="mcp", help="Resolve MCP connection details")
+app.add_typer(
+    create.app,
+    name="create",
+    help="Scaffold deployable Machina apps",
+    rich_help_panel="Platform",
+)
+app.add_typer(org.app, name="org", help="Organization management", rich_help_panel="Platform")
+app.add_typer(project.app, name="project", help="Project management", rich_help_panel="Platform")
+app.add_typer(
+    credentials.app,
+    name="credentials",
+    help="API key management",
+    rich_help_panel="Platform",
+)
+app.add_typer(
+    workflow.app, name="workflow", help="Workflow management", rich_help_panel="Resources"
+)
+app.add_typer(agent.app, name="agent", help="Agent management", rich_help_panel="Resources")
+app.add_typer(
+    connector.app, name="connector", help="Connector management", rich_help_panel="Resources"
+)
+app.add_typer(mapping.app, name="mapping", help="Mapping management", rich_help_panel="Resources")
+app.add_typer(prompt.app, name="prompt", help="Prompt management", rich_help_panel="Resources")
+app.add_typer(
+    document.app, name="document", help="Document management", rich_help_panel="Resources"
+)
+app.add_typer(
+    execution.app, name="execution", help="Execution management", rich_help_panel="Operations"
+)
+app.add_typer(
+    approvals.app,
+    name="approvals",
+    help="Human approvals (workflow checkpoints)",
+    rich_help_panel="Operations",
+)
+app.add_typer(skills.app, name="skills", help="Skills management", rich_help_panel="Operations")
+app.add_typer(
+    loop.app,
+    name="loop",
+    help="Durable agentic turn loop (harness)",
+    rich_help_panel="Operations",
+)
+app.add_typer(
+    factory.app,
+    name="factory",
+    help="Trigger Factory coding-agent builds",
+    rich_help_panel="Operations",
+)
+app.add_typer(
+    context_graph.app,
+    name="context-graph",
+    help="Self-healing / monitoring status across projects",
+    rich_help_panel="Operations",
+)
+app.add_typer(
+    template.app, name="template", help="Template management", rich_help_panel="Operations"
+)
+app.add_typer(deploy.app, name="deploy", help="Deployment management", rich_help_panel="Operations")
+app.add_typer(
+    config_cmd.app, name="config", help="Configuration management", rich_help_panel="Operations"
+)
+app.add_typer(
+    mcp.app, name="mcp", help="Resolve MCP connection details", rich_help_panel="Operations"
+)
 
 # Mount the sports-skills CLI dynamically under `machina sports …`.
 sports.register(app)
@@ -228,7 +228,7 @@ def shell_prompt():
         print("✦ machina")
 
 
-@app.command()
+@app.command(rich_help_panel="Session")
 def login(
     api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key"),
     with_credentials: bool = typer.Option(
@@ -248,7 +248,7 @@ def login(
         start_repl()
 
 
-@app.command(name="connect")
+@app.command(name="connect", rich_help_panel="Platform")
 def connect_command(
     project_id: str = typer.Argument(None, help="Project ID (defaults to the selected project)"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -268,19 +268,20 @@ def connect_command(
     connect.run(project_id, json_output, reveal, probe, name, mint, org)
 
 
-@app.command()
+@app.command(rich_help_panel="Session")
 def update(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force update even if already on latest"
     ),
+    check: bool = typer.Option(False, "--check", help="Check for updates without installing"),
 ):
     """Update machina-cli to the latest version."""
     from machina_cli.updater import do_update
 
-    do_update(force=force)
+    do_update(force=force, check=check)
 
 
-@app.command()
+@app.command(rich_help_panel="Session")
 def version():
     """Show CLI version."""
     console.print(f"machina-cli v{get_version()}")

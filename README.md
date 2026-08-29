@@ -345,6 +345,7 @@ machina config get <key>               # Read a setting
 
 ```bash
 machina update                         # Update to latest version
+machina update --check                 # Check without installing
 machina update --force                 # Force re-install
 machina version                        # Show current version
 ```
@@ -403,7 +404,7 @@ machina agent run my-agent --sync               # Wait for full result
 
 ## Global Options
 
-All list commands support pagination and JSON output:
+Resource list commands support pagination and JSON output (specialized lists may expose a subset):
 
 | Flag | Short | Description |
 |------|-------|-------------|

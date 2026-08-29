@@ -102,7 +102,7 @@ def register(app: typer.Typer) -> None:
         ),
         # Prevent Typer from rendering a rich help page that would hide the
         # sports-skills help output.
-        rich_help_panel="Sports",
+        rich_help_panel="Operations",
     )
     def sports(ctx: typer.Context) -> None:
         code = _invoke_sports_skills(ctx.args)
