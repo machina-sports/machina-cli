@@ -198,6 +198,10 @@ escala **antes e com motivo**) — o budget legado continua como teto (fail-clos
 chain-of-thought: distribuição + códigos de causa + linhas de evidência. `--replay` mostra o que o
 investigador teria dito em cada scan passado do pod (read-only). A CLI mostra a causa em
 `context-graph status` e os eventos `investigated`/`escalated` em `timeline`.
+**Aprendizado do heal ao vivo (staging, 2026-09-09):** vagas de chaveamento indefinidas (`W95 vs W96`) compartilham
+o texto "times ainda não definidos" por design e o workflow de pesquisa as descarta — o heal só recebe fixtures com os
+dois times definidos, e grupos só de placeholders são contados à parte (`broken_placeholder_edges`), como os jogos já
+encerrados. Sem isso, 3 de 5 slots do heal eram redespachados toda rodada e o backlog não drenava.
 
 ## 6.1 `nodes.py` — biblioteca de nós compartilhados (padrão Pressbox)
 
