@@ -293,12 +293,36 @@ def _research_ts(v, d):
     (pre_match_research_at), else the doc's last write."""
     return _ts(v.get("pre_match_research_at")) or _ts(d.get("updated") or d.get("created"))
 
+def _is_placeholder_name(name):
+    """Bracket placeholder ('W95', 'L96', '1A', '95'): a short (<=4 chars), space-less token
+    with a digit. Mirrors filter_determined_fixtures in the coverage controller, which DROPS
+    such fixtures from research -- there is nothing to research until the teams are known."""
+    n = str(name or "").strip()
+    if not n: return True
+    if " " in n: return False
+    if not any(ch.isdigit() for ch in n): return False
+    return len(n) <= 4
+
+def _undetermined(v, title):
+    """At least one side of this fixture is still a bracket slot."""
+    home, away = v.get("home_competitor_name"), v.get("away_competitor_name")
+    if not (home and away) and " vs " in title:
+        home, away = title.split(" vs ", 1)
+    return _is_placeholder_name(home) or _is_placeholder_name(away)
+
 def scan_edges(request_data: dict) -> dict:
     """analysis <-> fixture: distinct matches can't share an identical pre-match analysis.
 
     Alerting/healing metric (broken_edges) covers only groups touching at least one
-    not-yet-played fixture; groups made entirely of finished matches are counted
-    separately (broken_played_edges) -- real integrity debt, but no live page to fix."""
+    not-yet-played, team-determined fixture. Two classes are counted separately, never
+    healed and never alerted on: groups made entirely of finished matches
+    (broken_played_edges -- integrity debt, no live page to fix) and groups made entirely
+    of undetermined bracket slots ('W95 vs W96': broken_placeholder_edges -- they SHARE
+    the 'teams not yet known' text by design, and research drops them anyway). Mixed
+    groups stay: a real fixture carrying a placeholder's text is a live misattribution,
+    and only its team-determined fixtures are handed to the heal (learned live on
+    staging: undetermined ids were re-dispatched every round, silently dropped by the
+    research workflow, and starved the backlog of heal slots)."""
     p = request_data.get("params", {}) or request_data
     try: docs = _docs("sportradar-fixture", {"value.has_pre_match_research": True}, _limit(p))
     except Exception as ex:
@@ -313,10 +337,11 @@ def scan_edges(request_data: dict) -> dict:
             status = str(v.get("status") or "").lower()
             finished = status in FINISHED_STATUSES
             enriched.append((title, v.get("sport_event_id"), finished, re.sub(r"\s+", " ", ha.lower())[:160],
-                             bool(status), _research_ts(v, d)))
+                             bool(status), _research_ts(v, d), _undetermined(v, title)))
     groups = defaultdict(set); group_ids = defaultdict(set); group_live_ids = defaultdict(set)
     group_unknown_ids = defaultdict(set); group_ts = defaultdict(list)
-    for title, sid, finished, key, status_known, ts in enriched:
+    group_undet_ids = defaultdict(set); group_det_live_ids = defaultdict(set)
+    for title, sid, finished, key, status_known, ts, undetermined in enriched:
         groups[key].add(title)
         if ts is not None: group_ts[key].append(ts)
         if sid:
@@ -324,16 +349,25 @@ def scan_edges(request_data: dict) -> dict:
             if not finished:
                 group_live_ids[key].add(sid)
                 if not status_known: group_unknown_ids[key].add(sid)
+                if undetermined: group_undet_ids[key].add(sid)
+                else: group_det_live_ids[key].add(sid)
     collapsed = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
-    live_groups = {k: v for k, v in collapsed.items() if group_live_ids.get(k)}
     played_groups = {k: v for k, v in collapsed.items() if not group_live_ids.get(k)}
+    # live but every fixture still a bracket slot: expected to share the placeholder text
+    placeholder_groups = {k: v for k, v in collapsed.items()
+                          if group_live_ids.get(k) and not group_det_live_ids.get(k)}
+    live_groups = {k: v for k, v in collapsed.items() if group_det_live_ids.get(k)}
     broken = sum(len(v) - 1 for v in live_groups.values())
     broken_played = sum(len(v) - 1 for v in played_groups.values())
+    broken_placeholder = sum(len(v) - 1 for v in placeholder_groups.values())
     # fixture_ids feed the auto-heal: only the NOT-YET-PLAYED fixtures of live groups get
     # re-researched (we can't tell which fixture rightfully owns the analysis, and
     # re-researching a live owner is harmless -- but re-researching a finished match is
     # cost with no reader).
-    flagged = [{"fixtures": v, "fixture_ids": sorted(group_live_ids.get(k, set())), "analysis": k[:120]}
+    # fixture_ids = the team-DETERMINED live fixtures only (the ones research can act on);
+    # undetermined ids ride along for transparency but are never dispatched.
+    flagged = [{"fixtures": v, "fixture_ids": sorted(group_det_live_ids.get(k, set())),
+                "undetermined_ids": sorted(group_undet_ids.get(k, set())), "analysis": k[:120]}
                for k, v in list(live_groups.items())[:10]]
     n = len(enriched)
     # investigator evidence (belief.py): do we KNOW the flagged fixtures are upcoming, and were the
@@ -342,11 +376,14 @@ def scan_edges(request_data: dict) -> dict:
     unknown_status_ids = sum(len(group_unknown_ids.get(k, ())) for k in live_groups)
     batch_groups = sum(1 for k in live_groups if len(group_ts.get(k, [])) > 1
                        and (max(group_ts[k]) - min(group_ts[k])) <= BATCH_WINDOW_SECONDS)
+    placeholder_ids = sum(len(group_undet_ids.get(k, ())) for k in live_groups)
     health = {"edge": "analysis<->fixture", "sampled": n, "collapsed_groups": len(collapsed),
               "broken_edges": broken, "broken_played_edges": broken_played,
+              "broken_placeholder_edges": broken_placeholder, "placeholder_groups": len(placeholder_groups),
               "broken_rate_pct": round(100 * broken / n) if n else 0,
               "live_groups": len(live_groups), "batch_groups": batch_groups,
-              "live_ids": live_ids, "unknown_status_ids": unknown_status_ids}
+              "live_ids": live_ids, "unknown_status_ids": unknown_status_ids,
+              "placeholder_ids": placeholder_ids}
     return {"status": True, "data": {"health": health, "flagged": flagged, "heal_needed": broken > 0}}
 
 def scan_odds(request_data: dict) -> dict:
@@ -698,6 +735,10 @@ def notify_slack(request_data: dict) -> dict:
     }.get(edge, "%s record(s) are attributed to the wrong entity.")
     played = health.get("broken_played_edges") or 0
     played_note = (" (%s more on already-played matches -- archival debt, not healed)" % played) if played else ""
+    undet = health.get("broken_placeholder_edges") or 0
+    if undet:
+        played_note += (" (%s more between undetermined bracket slots -- they share the 'teams not yet known' "
+                        "text by design, not healed)" % undet)
 
     assessment = (p.get("assessment") or "").strip()
     # Investigator block: the most likely cause with its probability, WHY (the evidence), the next
