@@ -126,6 +126,14 @@ def _edge_summary(edge: str, h: dict) -> tuple:
     return ("ok", "green", "—")
 
 
+def _project_label(pid: str) -> str:
+    """The configured project name only when `pid` IS the selected project; an explicit
+    `--project` that differs must not be labelled with the default project's name."""
+    if pid == get_config("default_project_id"):
+        return get_config("default_project_name") or pid
+    return pid
+
+
 def _belief_lines(belief: dict) -> list:
     """Render the investigator's belief (value.belief on the health doc) for one edge.
 
@@ -240,7 +248,7 @@ def status(
         if json_output:
             console.print_json(json_lib.dumps(st, default=str))
             return
-        _render_one(get_config("default_project_name") or pid, pid, st)
+        _render_one(_project_label(pid), pid, st)
         return
 
     # --org: iterate the org's projects
@@ -538,7 +546,7 @@ def timeline(
                 "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
             )
             raise typer.Exit(1)
-        pname = get_config("default_project_name") or pid
+        pname = _project_label(pid)
         for ev in _collect_timeline(pid):
             rows.append((pname, ev))
 
