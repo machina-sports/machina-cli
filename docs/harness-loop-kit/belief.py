@@ -174,7 +174,10 @@ def observe(edge, health, flagged, history, heal_configured=True):
         if len(new) / len(cur_ids) >= 0.5:
             ev.append(("new_groups=new_breakage",
                        "%s/%s flagged fixtures are new since the last scan" % (len(new), len(cur_ids))))
-        else:
+        elif prev_attempted:
+            # "same fixtures as last scan" only discriminates AFTER a heal round: healed fixtures
+            # leave the set, so what remains is the backlog. With nothing healed in between,
+            # every hypothesis predicts the same set -- no evidence either way.
             ev.append(("new_groups=same_set",
                        "%s/%s flagged fixtures were already flagged last scan" % (len(cur_ids) - len(new), len(cur_ids))))
 

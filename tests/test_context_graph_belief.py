@@ -134,6 +134,21 @@ def test_new_breakage_after_a_heal_round_points_at_the_pipeline():
     assert any(e.startswith("new_groups=new_breakage") for e in b["evidence"])
 
 
+def test_same_fixtures_without_a_heal_round_is_not_evidence():
+    # detect-only pod (or heal not yet fired): the same flagged set is what EVERY hypothesis
+    # predicts, so the belief must not drift toward "backlog" scan after scan
+    live = {"live_groups": 46, "batch_groups": 46, "live_ids": 104, "unknown_status_ids": 0}
+    trail = [_scan(0), _scan(58, None, IDS, live), _scan(58, None, IDS, live), _scan(58, None, IDS, live)]
+    out = belief.replay(trail, EDGE, heal_configured=False)
+    assert out[1]["top"] == "pipeline_batch_inheritance"
+    assert out[3]["top"] == "pipeline_batch_inheritance" and out[3]["top_p"] == out[1]["top_p"]
+    assert not any(e.startswith("new_groups=") for e in out[3]["evidence"])
+    # ...but NEW collapsed groups appearing with nothing healed in between still count
+    fresh = tuple(f"sr:sport_event:new{i}" for i in range(13))
+    b = belief.replay([_scan(0), _scan(13, None, IDS), _scan(13, None, fresh)], EDGE, heal_configured=False)[2]
+    assert any(e.startswith("new_groups=new_breakage") for e in b["evidence"])
+
+
 def test_detect_only_pod_drops_heal_only_hypotheses_and_escalates():
     b = belief.investigate(EDGE, {"edge": EDGE, "broken_edges": 13, **KNOWN_BATCH}, [], [], heal_configured=False)
     assert {h["cause"] for h in b["hypotheses"]} == {
