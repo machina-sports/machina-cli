@@ -851,7 +851,9 @@ def _audit_workflow(name, title, desc, scan_command, with_heal=False):
          "outputs": {"cg_summary": "$"}},
         # the LLM narrates the belief for Slack -- only when there is an incident (saves tokens).
         {"name": "context-investigate-eval", "type": "prompt", "connector": GENAI,
-         "condition": "$.get('cg_belief', {}).get('incident', False) == True",
+         # only when there is an incident AND a hypothesis catalog for the edge (the odds edge has
+         # a count but no catalog yet -- nothing to narrate, no LLM call)
+         "condition": "len($.get('cg_belief', {}).get('hypotheses', [])) > 0",
          "inputs": {"_1-belief": "$.get('cg_belief', {})", "_2-health": "$.get('cg_health', {})"},
          "outputs": {"cg_investigation": "$"}},
     ]
