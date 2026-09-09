@@ -126,3 +126,84 @@ def test_unknown_edges_and_bad_dates_are_skipped():
         _health_doc("Wed, 01 Jul 2026 10:00:00 GMT", "market->fixture(link)", 5),
     ]
     assert _events_from_history(docs, []) == []
+
+
+# --- investigator (belief state) events -------------------------------------------------
+
+def _belief(top, p, escalate=False, reason=None, evidence=("progress=stuck_2plus (13 -> 13)",)):
+    return {
+        "incident": True,
+        "top": top,
+        "top_p": p,
+        "escalate": escalate,
+        "escalate_reason": reason,
+        "evidence": list(evidence),
+        "hypotheses": [{"cause": top, "p": p}],
+    }
+
+
+def _health_doc_with_belief(created, broken, belief, healed=None):
+    doc = _health_doc(created, "analysis<->fixture", broken, healed)
+    doc["value"]["belief"] = belief
+    return doc
+
+
+def test_belief_adds_investigated_and_escalated_events():
+    docs = [
+        _health_doc("Wed, 01 Jul 2026 10:00:00 GMT", "analysis<->fixture", 0),
+        _health_doc_with_belief("Wed, 01 Jul 2026 11:00:00 GMT", 13,
+                                _belief("pipeline_batch_inheritance", 0.64, evidence=()),
+                                {"heal_count": 5}),
+        _health_doc_with_belief("Wed, 01 Jul 2026 12:00:00 GMT", 13,
+                                _belief("pipeline_batch_inheritance", 0.58), {"heal_count": 5}),
+        _health_doc_with_belief("Wed, 01 Jul 2026 13:00:00 GMT", 13,
+                                _belief("pipeline_batch_inheritance", 0.72, True,
+                                        "pipeline_batch_inheritance (72%): root cause needs a human"),
+                                {"heal_count": 5}),
+        _health_doc("Wed, 01 Jul 2026 14:00:00 GMT", "analysis<->fixture", 0),
+    ]
+    events = _events_from_history(docs, [])
+    kinds = [(e["event"], e["ts"].hour) for e in events]
+    assert kinds == [
+        ("detected", 11), ("heal", 11), ("investigated", 11),
+        ("heal", 12),                       # same top cause: no repeat "investigated"
+        ("heal", 13), ("escalated", 13),
+        ("recovered", 14),
+    ]
+    assert events[2]["detail"] == "most likely pipeline_batch_inheritance (64%) — on priors"
+    assert "root cause needs a human" in events[5]["detail"]
+
+
+def test_investigated_fires_again_when_the_leading_cause_changes():
+    docs = [
+        _health_doc_with_belief("Wed, 01 Jul 2026 11:00:00 GMT", 13,
+                                _belief("pipeline_batch_inheritance", 0.4, evidence=())),
+        _health_doc_with_belief("Wed, 01 Jul 2026 12:00:00 GMT", 10,
+                                _belief("stale_backlog_draining", 0.79,
+                                        evidence=("progress=improved (13 -> 10 after a heal round)",))),
+    ]
+    events = [e for e in _events_from_history(docs, []) if e["event"] == "investigated"]
+    assert [e["detail"] for e in events] == [
+        "most likely pipeline_batch_inheritance (40%) — on priors",
+        "most likely stale_backlog_draining (79%) — progress=improved",
+    ]
+
+
+def test_escalation_state_resets_after_recovery():
+    esc = _belief("pipeline_batch_inheritance", 0.72, True, "needs a human")
+    docs = [
+        _health_doc_with_belief("Wed, 01 Jul 2026 11:00:00 GMT", 13, esc),
+        _health_doc("Wed, 01 Jul 2026 12:00:00 GMT", "analysis<->fixture", 0),
+        _health_doc_with_belief("Wed, 01 Jul 2026 13:00:00 GMT", 2, esc),
+    ]
+    events = [e["event"] for e in _events_from_history(docs, [])]
+    assert events.count("escalated") == 2 and events.count("investigated") == 2
+
+
+def test_docs_without_belief_emit_no_investigator_events():
+    docs = [
+        _health_doc("Wed, 01 Jul 2026 10:00:00 GMT", "analysis<->fixture", 13, {"heal_count": 5}),
+        _health_doc("Wed, 01 Jul 2026 11:00:00 GMT", "analysis<->fixture", 0),
+    ]
+    events = [e["event"] for e in _events_from_history(docs, [])]
+    assert "investigated" not in events and "escalated" not in events

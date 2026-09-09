@@ -2,6 +2,12 @@
 
 All notable changes to machina-cli are documented here.
 
+## [Unreleased]
+
+### Added
+- **Context Graph investigator (belief state).** The self-healing kit no longer decides "what next" by counting alone. `docs/harness-loop-kit/belief.py` (embedded verbatim into the `context-verify-tools` connector) keeps a Bayesian posterior over the competing causes of a broken `analysis<->fixture` edge — pipeline batch-inheritance, a draining backlog, a not-live false positive, a failing heal mechanism — updated every scan from deterministic evidence (did the last heal round move the count, are the flagged fixtures the same ones, did the dispatches error, are the fixtures really upcoming, were the groups written within one pipeline batch) and persisted as `value.belief` on the health doc. Code decides (hypotheses, priors, likelihoods are reviewable tables); the new `context-investigate-eval` prompt only narrates for Slack. The belief can only make healing more conservative — it skips a heal a not-a-defect cause explains and escalates earlier *with a reason* (e.g. "root cause needs a human", "heal mechanism failing") — while the legacy no-progress budget stays as the hard cap. `scan_edges` now also reports `live_groups`, `batch_groups`, `live_ids`, `unknown_status_ids` (the evidence). `python3 context-verify.py --replay` replays the investigator over a pod's existing trail, read-only; `--scan` runs one more audit round without re-provisioning.
+- **`machina context-graph status`** shows the investigator's belief under a degraded data edge (most likely cause, probability, confidence, runner-up, next check, and `heal skipped` / `escalated: <reason>` when the decision deviates from plain healing). **`timeline`** gains `investigated` (leading cause appeared/changed) and `escalated` (belief flipped to "needs a human", with the reason) events; docs written before the investigator existed render exactly as before.
+
 ## [0.8.2] - 2026-08-29
 
 ### Added

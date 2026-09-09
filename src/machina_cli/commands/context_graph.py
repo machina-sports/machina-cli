@@ -126,6 +126,43 @@ def _edge_summary(edge: str, h: dict) -> tuple:
     return ("ok", "green", "—")
 
 
+def _project_label(pid: str) -> str:
+    """The configured project name only when `pid` IS the selected project; an explicit
+    `--project` that differs must not be labelled with the default project's name."""
+    if pid == get_config("default_project_id"):
+        return get_config("default_project_name") or pid
+    return pid
+
+
+def _belief_lines(belief: dict) -> list:
+    """Render the investigator's belief (value.belief on the health doc) for one edge.
+
+    (text, style) lines: the most likely cause with its probability and the next check,
+    then the decision when it deviates from plain healing (heal skipped / escalated).
+    Docs written before the investigator existed carry no belief and render nothing.
+    """
+    if not isinstance(belief, dict) or not belief.get("incident"):
+        return []
+    hs = belief.get("hypotheses") or []
+    if not hs:
+        return []
+    top = hs[0]
+    pct = round((top.get("p") or 0) * 100)
+    runner = ""
+    if len(hs) > 1:
+        runner = f" · runner-up {hs[1].get('cause')} {round((hs[1].get('p') or 0) * 100)}%"
+    lines = [
+        (f"cause {top.get('cause')} {pct}% ({belief.get('confidence', '?')}){runner}", "magenta")
+    ]
+    if top.get("next_check"):
+        lines.append((f"next  {top['next_check']}", "dim"))
+    if belief.get("action") == "skip_heal":
+        lines.append(("heal skipped by the investigator", "yellow"))
+    if belief.get("escalate"):
+        lines.append((f"escalated: {belief.get('escalate_reason') or 'needs a human'}", "red"))
+    return lines
+
+
 def _collect(project_id: str) -> dict:
     """Live self-healing status for one project. Raises on unreachable/no-access."""
     client = ProjectClient(project_id)
@@ -135,6 +172,8 @@ def _collect(project_id: str) -> dict:
         e = h.get("edge")
         if e and e not in edges:
             h["_seen"] = str(doc.get("updated") or doc.get("created") or "")
+            # investigator belief (value.belief) rides the same doc; rendered under the edge
+            h["_belief"] = (doc.get("value") or {}).get("belief") or {}
             edges[e] = h
     surf_docs = _docs(client, "context_graph_surface_health", 1)
     surface = (surf_docs[0].get("value") or {}) if surf_docs else None
@@ -163,6 +202,8 @@ def _render_one(name: str, pid: str, st: dict) -> None:
         badge, color, detail = _edge_summary(edge, h)
         badge, color, detail = _apply_staleness(badge, color, detail, h.get("_seen", ""))
         console.print(f"  edge [bold]{edge:24}[/] [{color}]{badge:9}[/] [dim]{detail}[/]")
+        for line, style in _belief_lines(h.get("_belief") or {}):
+            console.print(f"       [{style}]{line}[/]")
     s = st["surface"]
     if s:
         v = s.get("verdict", "?")
@@ -207,7 +248,7 @@ def status(
         if json_output:
             console.print_json(json_lib.dumps(st, default=str))
             return
-        _render_one(get_config("default_project_name") or pid, pid, st)
+        _render_one(_project_label(pid), pid, st)
         return
 
     # --org: iterate the org's projects
@@ -308,6 +349,11 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
     a 0->N broken step is a detection, healed.heal_count>0 is a heal round,
     healed.budget_exceeded is auto-heal pausing, N->0 is a recovery. Works
     retroactively on any pod that has history — no new writes needed.
+
+    Docs that carry the investigator's `belief` add two events: `investigated`
+    when the most likely cause changes (or first appears) inside an incident,
+    and `escalated` when the belief flips to "needs a human" — with its reason.
+    Older docs without a belief produce neither (backward compatible).
     """
     events = []
 
@@ -323,13 +369,14 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
         if ts is None:
             continue
         per_edge.setdefault(edge, []).append(
-            (ts, h.get(_DATA_EDGE_COUNT[edge]) or 0, v.get("healed") or {})
+            (ts, h.get(_DATA_EDGE_COUNT[edge]) or 0, v.get("healed") or {}, v.get("belief") or {})
         )
     for edge, rows in per_edge.items():
         rows.sort(key=lambda r: r[0])
         prev_broken = 0
         peak = 0  # incident peak, so a drained recovery reads "peaked at 13", not "was 1"
-        for ts, broken, healed in rows:
+        prev_top, prev_escalate = None, False  # investigator state across the incident
+        for ts, broken, healed, belief in rows:
             if broken > 0:
                 peak = max(peak, broken)
             if broken > 0 and prev_broken == 0:
@@ -356,6 +403,31 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                         "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human",
                     }
                 )
+            incident = isinstance(belief, dict) and bool(belief.get("incident"))
+            top = belief.get("top") if incident else None
+            if top and top != prev_top:
+                pct = round((belief.get("top_p") or 0) * 100)
+                ev = belief.get("evidence") or []
+                why = f" — {ev[0].split(' (', 1)[0]}" if ev else " — on priors"
+                events.append(
+                    {
+                        "ts": ts,
+                        "edge": edge,
+                        "event": "investigated",
+                        "detail": f"most likely {top} ({pct}%){why}",
+                    }
+                )
+            if incident and belief.get("escalate") and not prev_escalate:
+                events.append(
+                    {
+                        "ts": ts,
+                        "edge": edge,
+                        "event": "escalated",
+                        "detail": belief.get("escalate_reason") or "investigator: needs a human",
+                    }
+                )
+            prev_top = top
+            prev_escalate = bool(belief.get("escalate")) if incident else False
             if broken == 0 and prev_broken > 0:
                 events.append(
                     {
@@ -366,6 +438,7 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                     }
                 )
                 peak = 0
+                prev_top, prev_escalate = None, False
             prev_broken = broken
 
     # live surface (surface<->users)
@@ -425,7 +498,14 @@ def _collect_timeline(project_id: str) -> list:
     return _events_from_history(health, surface)
 
 
-_EVENT_STYLE = {"detected": "red", "heal": "cyan", "heal-paused": "bold red", "recovered": "green"}
+_EVENT_STYLE = {
+    "detected": "red",
+    "heal": "cyan",
+    "heal-paused": "bold red",
+    "recovered": "green",
+    "investigated": "magenta",
+    "escalated": "bold red",
+}
 
 
 @app.command("timeline")
@@ -466,13 +546,20 @@ def timeline(
                 "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
             )
             raise typer.Exit(1)
-        pname = get_config("default_project_name") or pid
+        pname = _project_label(pid)
         for ev in _collect_timeline(pid):
             rows.append((pname, ev))
 
     rows = [(n, e) for n, e in rows if e["ts"] >= cutoff]
     rows.sort(key=lambda r: r[1]["ts"])
-    counts = {"detected": 0, "heal": 0, "heal-paused": 0, "recovered": 0}
+    counts = {
+        "detected": 0,
+        "heal": 0,
+        "heal-paused": 0,
+        "recovered": 0,
+        "investigated": 0,
+        "escalated": 0,
+    }
     for _, e in rows:
         counts[e["event"]] = counts.get(e["event"], 0) + 1
 
@@ -520,5 +607,10 @@ def timeline(
     console.print(
         f"  [dim]{counts['detected']} detected · {counts['heal']} heal round(s) · "
         f"{counts['recovered']} recovered · {counts['heal-paused']} escalated to a human[/]"
+        + (
+            f" [dim]· {counts['escalated']} escalated by the investigator[/]"
+            if counts["escalated"]
+            else ""
+        )
         + (f" [dim]· {skipped} project(s) skipped[/]" if skipped else "")
     )

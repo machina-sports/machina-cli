@@ -45,10 +45,24 @@ scan's broken count), and a no-PROGRESS budget (max_heal_attempts, default 3) st
 re-dispatching when healing isn't working and escalates to Slack instead -- a draining
 backlog (13->10->7) never trips it; a stuck one (13->13->13) does.
 
+Investigator (belief state -- belief.py, embedded verbatim into the connector): the heal
+step no longer decides "what next" by counting alone. Every scan of a broken edge computes
+a distribution over the competing CAUSES (pipeline batch-inheritance, a draining backlog, a
+not-live false positive, a failing heal mechanism) from deterministic evidence -- did the
+last heal round move the count, are the flagged fixtures the same ones, did the dispatches
+error, are the fixtures really upcoming, were the groups written in one pipeline batch --
+and persists it as `value.belief` on the health doc. Code decides (hypotheses, priors and
+likelihoods are tables in belief.py); the `context-investigate-eval` prompt only narrates
+for Slack. The belief can only make healing MORE conservative (skip a heal a not-a-defect
+cause explains; escalate earlier WITH a reason); the legacy no-progress budget stays as the
+hard cap. `--replay` shows what the investigator would have said at each past scan of the
+pod's existing trail (read-only, no provisioning).
+
 Provisions:
   connector context-verify-tools     scan_edges + scan_odds + scan_link
   prompt    context-verify-eval      edge-agnostic assessment (analysis, odds)
   prompt    context-link-eval        semantic resolver/healer for the linkability edge
+  prompt    context-investigate-eval narrates the belief state for Slack (code decides, LLM narrates)
   workflow  context-verify / -odds / -link   (-link writes context_graph_health + context_graph_links)
   agent     context-verify-runner    on-demand: every edge audit + heal
   agent     context-verify-beat      scheduled continuous sweep (inactive by default)
@@ -61,6 +75,8 @@ Usage:
     python3 context-verify.py            # provision
     python3 context-verify.py --run      # provision, run all audits, print graph health
     python3 context-verify.py --teardown # remove
+    python3 context-verify.py --replay   # read-only: the investigator's belief at each past scan
+    python3 context-verify.py --scan     # one more audit round, no re-provisioning (watch the belief update)
 
 If this pod stores the same fixture/markets schema under a brand-prefixed doc name
 (check with a document/search sample first — same field names, different `name`),
@@ -97,6 +113,14 @@ MARKETS_DOC_NAME = os.environ.get("MARKETS_DOC_NAME", "entain-markets-tier3")
 # is provisioned and the analysis audit gains a heal step (async dispatch, budgeted).
 ANALYSIS_HEAL_WORKFLOW = os.environ.get("ANALYSIS_HEAL_WORKFLOW", "").strip()
 HEAL_AGENT_NAME = "context-heal-runner"
+KIT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _belief_src():
+    """belief.py, embedded verbatim into the connector so the pod runs the SAME investigator the
+    tests and `--replay` run locally (stdlib-only, no __main__ block -- by contract)."""
+    with open(os.path.join(KIT_DIR, "belief.py"), encoding="utf-8") as f:
+        return f.read()
 GENAI = {"command": "invoke_prompt", "location": "global", "model": MODEL,
          "name": "google-genai", "provider": "vertex_ai"}
 CTX_VARS = {"debugger": {"enabled": True}, "google-genai": {
@@ -137,6 +161,8 @@ def _create(kind, body):
 SCAN_SRC = r'''"""Context Graph edge scanners (analysis, odds, linkability)."""
 import json, os, re, unicodedata, urllib.request, urllib.error
 from collections import defaultdict
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 def _docs(name, extra, limit):
     from core.document.controller import document_search
@@ -250,6 +276,23 @@ def _pairing(v):
 # relevant (never hide a possibly-live page).
 FINISHED_STATUSES = ("closed", "ended", "cancelled")
 
+# Investigator evidence: fixtures whose research landed within this window were written by ONE
+# pipeline batch -- the signature of the #705 class (one analysis copied across a batch).
+BATCH_WINDOW_SECONDS = 900
+
+def _ts(raw):
+    """Epoch seconds from an RFC 2822 or ISO 8601 stamp, or None."""
+    if not raw: return None
+    try: return parsedate_to_datetime(str(raw)).timestamp()
+    except Exception: pass
+    try: return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+    except Exception: return None
+
+def _research_ts(v, d):
+    """When this fixture's research was written: the pipeline's own stamp when present
+    (pre_match_research_at), else the doc's last write."""
+    return _ts(v.get("pre_match_research_at")) or _ts(d.get("updated") or d.get("created"))
+
 def scan_edges(request_data: dict) -> dict:
     """analysis <-> fixture: distinct matches can't share an identical pre-match analysis.
 
@@ -267,14 +310,20 @@ def scan_edges(request_data: dict) -> dict:
         ha = ((tf.get("home") or {}).get("analysis") or "").strip()
         title = re.sub(r"\s*\(\d+\)\s*$", "", str(v.get("title") or "")).strip()
         if ha and title:
-            finished = str(v.get("status") or "").lower() in FINISHED_STATUSES
-            enriched.append((title, v.get("sport_event_id"), finished, re.sub(r"\s+", " ", ha.lower())[:160]))
+            status = str(v.get("status") or "").lower()
+            finished = status in FINISHED_STATUSES
+            enriched.append((title, v.get("sport_event_id"), finished, re.sub(r"\s+", " ", ha.lower())[:160],
+                             bool(status), _research_ts(v, d)))
     groups = defaultdict(set); group_ids = defaultdict(set); group_live_ids = defaultdict(set)
-    for title, sid, finished, key in enriched:
+    group_unknown_ids = defaultdict(set); group_ts = defaultdict(list)
+    for title, sid, finished, key, status_known, ts in enriched:
         groups[key].add(title)
+        if ts is not None: group_ts[key].append(ts)
         if sid:
             group_ids[key].add(sid)
-            if not finished: group_live_ids[key].add(sid)
+            if not finished:
+                group_live_ids[key].add(sid)
+                if not status_known: group_unknown_ids[key].add(sid)
     collapsed = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
     live_groups = {k: v for k, v in collapsed.items() if group_live_ids.get(k)}
     played_groups = {k: v for k, v in collapsed.items() if not group_live_ids.get(k)}
@@ -287,9 +336,17 @@ def scan_edges(request_data: dict) -> dict:
     flagged = [{"fixtures": v, "fixture_ids": sorted(group_live_ids.get(k, set())), "analysis": k[:120]}
                for k, v in list(live_groups.items())[:10]]
     n = len(enriched)
+    # investigator evidence (belief.py): do we KNOW the flagged fixtures are upcoming, and were the
+    # collapsed groups written together in one pipeline batch (the #705 signature)?
+    live_ids = sum(len(group_live_ids.get(k, ())) for k in live_groups)
+    unknown_status_ids = sum(len(group_unknown_ids.get(k, ())) for k in live_groups)
+    batch_groups = sum(1 for k in live_groups if len(group_ts.get(k, [])) > 1
+                       and (max(group_ts[k]) - min(group_ts[k])) <= BATCH_WINDOW_SECONDS)
     health = {"edge": "analysis<->fixture", "sampled": n, "collapsed_groups": len(collapsed),
               "broken_edges": broken, "broken_played_edges": broken_played,
-              "broken_rate_pct": round(100 * broken / n) if n else 0}
+              "broken_rate_pct": round(100 * broken / n) if n else 0,
+              "live_groups": len(live_groups), "batch_groups": batch_groups,
+              "live_ids": live_ids, "unknown_status_ids": unknown_status_ids}
     return {"status": True, "data": {"health": health, "flagged": flagged, "heal_needed": broken > 0}}
 
 def scan_odds(request_data: dict) -> dict:
@@ -407,6 +464,44 @@ def resolve_link_ids(request_data: dict) -> dict:
     return {"status": True, "data": {"links": links, "resolved": len(links),
             "deterministic": det_n, "semantic": len(links) - det_n, "rejected": rejected}}
 
+def _edge_history(edge, n=30):
+    """This edge's prior health-doc values, newest first -- the loop's only memory."""
+    try:
+        from core.document.controller import document_search
+        r = document_search(filters={"name": "context_graph_health"}, page=1, page_size=n,
+                             sorters=["created", -1])
+        dd = r.get("data") if isinstance(r, dict) else None
+        rows = dd.get("data") if isinstance(dd, dict) else (dd if isinstance(dd, list) else [])
+    except Exception:
+        return []
+    out = []
+    for row in rows or []:
+        v = row.get("value") or {}
+        if (v.get("health") or {}).get("edge") == edge:
+            out.append(v)
+    return out
+
+def investigate_edge(request_data: dict) -> dict:
+    """Bayesian investigator (belief.py, embedded below): a distribution over the competing
+    causes of this edge's broken count, updated from deterministic evidence + the doc trail.
+    Runs BEFORE heal (so heal can read `action`) and before save-health (so the history it
+    reads is genuinely the prior readings). Never raises: a belief failure must never fail
+    the audit -- it degrades to 'no belief', which every consumer treats as unknown."""
+    p = request_data.get("params", {}) or request_data
+    health = p.get("health") or {}
+    edge = health.get("edge") or "unknown"
+    heal_agent = (p.get("heal_agent") or "").strip()
+    heal_configured = bool(heal_agent) and not heal_agent.startswith("$")
+    try: max_attempts = int(p.get("max_heal_attempts", 3) or 3)
+    except Exception: max_attempts = 3
+    try:
+        belief = investigate(edge, health, p.get("flagged") or [], _edge_history(edge),
+                             heal_configured, max_attempts)
+    except Exception as e:
+        belief = {"version": BELIEF_VERSION, "edge": edge, "incident": False, "action": "none",
+                  "escalate": False, "error": str(e)[:150]}
+    return {"status": True, "data": {"belief": belief}}
+
 def _stuck_heal_attempts(current_broken):
     """How many CONSECUTIVE prior analysis<->fixture scans attempted a heal WITHOUT the
     broken count improving, walking back from now. Progress resets the chain: a backlog
@@ -457,6 +552,13 @@ def trigger_analysis_heal(request_data: dict) -> dict:
     heal_agent = (p.get("heal_agent") or "").strip()
     if not heal_agent or heal_agent.startswith("$"):
         return {"status": True, "data": {"healed": [], "heal_count": 0, "skipped": "heal not configured"}}
+
+    # Investigator gate (belief.py): a not-a-defect or heal-mechanism-failing belief skips the
+    # dispatch. It can only make healing MORE conservative -- the budget below still caps it.
+    belief = p.get("belief") or {}
+    if isinstance(belief, dict) and belief.get("action") == "skip_heal":
+        return {"status": True, "data": {"healed": [], "heal_count": 0, "belief_action": "skip_heal",
+                                          "skipped": "investigator: %s" % (belief.get("explain") or belief.get("top") or "?")}}
 
     health = p.get("health") or {}
     current_broken = health.get("broken_edges") or 0
@@ -543,7 +645,7 @@ def notify_slack(request_data: dict) -> dict:
     # readings walking back from now (peak count, heal rounds, fixtures re-researched).
     # Without the incident walk, the recovered message reports only the last reading
     # ("was 1" after a 13->10->7->4->1 drain) and the story is invisible to the reader.
-    prev_count, prev_budget_exceeded = None, False
+    prev_count, prev_budget_exceeded, prev_belief_escalate = None, False, False
     peak, healed_total, heal_rounds = 0, 0, 0
     try:
         from core.document.controller import document_search
@@ -560,6 +662,7 @@ def notify_slack(request_data: dict) -> dict:
             if first:
                 prev_count = (rv.get("health") or {}).get(count_field)
                 prev_budget_exceeded = bool((rv.get("healed") or {}).get("budget_exceeded"))
+                prev_belief_escalate = bool((rv.get("belief") or {}).get("escalate"))
                 first = False
             if b <= 0:
                 break  # incident start reached
@@ -573,13 +676,18 @@ def notify_slack(request_data: dict) -> dict:
     healed = p.get("healed") or {}
     heal_count = healed.get("heal_count") or 0
     budget_exceeded = bool(healed.get("budget_exceeded"))
+    belief = p.get("belief") if isinstance(p.get("belief"), dict) else {}
+    narrative = (p.get("narrative") or "").strip()
 
     was_broken = bool(prev_count and prev_count > 0)
     is_broken = count > 0
     # Hitting the heal budget is news even when the broken count itself didn't move --
     # auto-heal just gave up, which is exactly when a human must take over.
     newly_exhausted = is_broken and budget_exceeded and not prev_budget_exceeded
-    if is_broken == was_broken and not newly_exhausted:
+    # The investigator escalating is news too: the count may not have moved, but the belief now
+    # says a human is needed -- and WHY -- before the blind budget would have paged.
+    newly_escalated = is_broken and bool(belief.get("escalate")) and not prev_belief_escalate
+    if is_broken == was_broken and not newly_exhausted and not newly_escalated:
         return {"status": True, "data": {"notified": False, "skipped": "unchanged"}}
 
     # Plain-language meaning of a broken edge, so the reader doesn't need to know the
@@ -592,11 +700,31 @@ def notify_slack(request_data: dict) -> dict:
     played_note = (" (%s more on already-played matches -- archival debt, not healed)" % played) if played else ""
 
     assessment = (p.get("assessment") or "").strip()
+    # Investigator block: the most likely cause with its probability, WHY (the evidence), the next
+    # check -- narrated by the prompt when available, deterministic otherwise.
+    investigator = ""
+    if belief.get("incident") and belief.get("hypotheses"):
+        top = belief["hypotheses"][0]
+        pct = int(round((top.get("p") or 0) * 100))
+        investigator = "\n>:mag: *Investigator:* most likely `%s` (%s%%) -- %s" % (
+            top.get("cause"), pct, narrative or belief.get("explain") or "")
+        if belief.get("escalate_reason"):
+            investigator += "\n>*Why a human:* %s" % belief["escalate_reason"]
     if is_broken and budget_exceeded:
         headline = ":rotating_light: *Context Graph -- could NOT self-heal* (`%s`)" % edge
         body = ("Still %s broken after %s heal rounds with no progress -- auto-heal is pausing. "
                  "*Needs a human.*" % (count, healed.get("prior_attempts", "?")))
         if assessment: body += "\n>%s" % assessment
+        body += investigator
+    elif is_broken and healed.get("belief_action") == "skip_heal":
+        headline = ":mag: *Context Graph -- data issue found, heal skipped by the investigator* (`%s`)" % edge
+        body = (meaning % count) + played_note + (("\n>" + assessment) if assessment else "") + investigator
+    elif is_broken and newly_escalated and was_broken:
+        headline = ":mag: *Context Graph -- investigator escalated* (`%s`)" % edge
+        body = (meaning % count) + played_note + investigator
+        if heal_count:
+            body += ("\n>Auto-heal keeps re-researching (%d dispatched this round) while a human "
+                     "looks at the root cause." % heal_count)
     elif is_broken and heal_count > 0:
         backlog = healed.get("backlog") or 0
         tail = " (%d more queued for the next scans)" % backlog if backlog else ""
@@ -605,11 +733,13 @@ def notify_slack(request_data: dict) -> dict:
                (("\n>" + assessment) if assessment else "") + \
                ("\n>Auto-heal is re-researching each affected fixture (fresh web search + AI extraction "
                 "replaces the misattributed text) -- %d dispatched%s; the next scans verify." % (heal_count, tail))
+        body += investigator
     elif is_broken:
         headline = ":rotating_light: *Context Graph -- data issue found* (`%s`)" % edge
         body = (meaning % count) + played_note + \
                (("\n>" + assessment) if assessment else "") + \
                "\n>*Needs a human* -- auto-heal is not configured for this edge here."
+        body += investigator
     else:
         headline = ":white_check_mark: *Context Graph -- recovered* (`%s`)" % edge
         if healed_total:
@@ -662,13 +792,29 @@ LINK_INSTR = (
     "_2-fixtures. Also a 2-sentence `assessment` naming ONE recovered example (PT→EN) — the link a "
     "deterministic join misses.")
 
+INVESTIGATE_SCHEMA = {"title": "ContextGraphInvestigation", "type": "object", "properties": {
+    "narrative": {"type": "string"}}, "required": ["narrative"]}
+INVESTIGATE_INSTR = (
+    "You NARRATE a Context Graph investigator's belief state for an engineer reading Slack. "
+    "_1-belief is a JSON belief: ranked hypotheses (cause, p, remedy, next_check), the evidence lines "
+    "that produced them, and the decision (action, escalate, escalate_reason). _2-health is the edge's "
+    "raw counts. The numbers were computed deterministically -- you do NOT re-estimate them.\n"
+    "Write a 2-3 sentence `narrative`: (1) the most likely cause with its probability, (2) WHY, citing the "
+    "evidence lines in plain words (which signals moved the belief), (3) the single next check that would "
+    "most change the picture, and the runner-up cause with its probability. If escalate is true, say in "
+    "one clause why a human is needed. Terse, factual, no advice beyond the next check, no invented "
+    "evidence, no numbers that are not in _1-belief.")
+
 # --- workflow fragments ---
 HVAL = ("{'edge':$.get('cg_health', {}).get('edge','?'),'health':$.get('cg_health', {}),"
         "'flagged':$.get('cg_flagged', []),'assessment':$.get('cg_summary', {}).get('assessment',''),"
         # heal attempts ride the history doc: the stuck-heal budget and the timeline both
         # reconstruct from this trail (each scan is a fresh process with no other memory).
         "'healed':$.get('cg_healed', {}),"
-        "'generator':'context-verify v0'}")
+        # investigator: the belief state + the LLM's narration ride the same trail doc.
+        "'belief':$.get('cg_belief', {}),"
+        "'investigation':$.get('cg_investigation', {}).get('narrative',''),"
+        "'generator':'context-verify v0.1 (investigator)'}")
 LINKVAL = ("{'edge':'market->fixture(link)','health':$.get('cg_health', {}),"
            "'recovered_by_semantic':len($.get('cg_link', {}).get('matches', [])),"
            "'orphans':len($.get('cg_link', {}).get('orphans', [])),"
@@ -691,9 +837,25 @@ def _audit_workflow(name, title, desc, scan_command, with_heal=False):
          "inputs": {"limit": "$.get('limit', 200)"},
          "outputs": {"cg_health": "$.get('health')", "cg_flagged": "$.get('flagged')",
                      "cg_heal": "$.get('heal_needed', False)"}},
+        # investigator (belief.py): deterministic belief over the causes of a broken count. Runs
+        # BEFORE heal (heal reads `action`) and before save-health (its history read is genuinely
+        # the prior readings). heal_agent empty = detect-only pod.
+        {"name": "investigate", "type": "connector",
+         "connector": {"command": "investigate_edge", "name": "context-verify-tools"},
+         "inputs": {"health": "$.get('cg_health', {})", "flagged": "$.get('cg_flagged', [])",
+                    "heal_agent": "'%s'" % (HEAL_AGENT_NAME if with_heal else ""),
+                    "max_heal_attempts": "$.get('max_heal_attempts', 3)"},
+         "outputs": {"cg_belief": "$.get('belief', {})"}},
         {"name": "context-verify-eval", "type": "prompt", "connector": GENAI,
          "inputs": {"_1-health": "$.get('cg_health', {})", "_2-flagged": "$.get('cg_flagged', [])"},
          "outputs": {"cg_summary": "$"}},
+        # the LLM narrates the belief for Slack -- only when there is an incident (saves tokens).
+        {"name": "context-investigate-eval", "type": "prompt", "connector": GENAI,
+         # only when there is an incident AND a hypothesis catalog for the edge (the odds edge has
+         # a count but no catalog yet -- nothing to narrate, no LLM call)
+         "condition": "len($.get('cg_belief', {}).get('hypotheses', [])) > 0",
+         "inputs": {"_1-belief": "$.get('cg_belief', {})", "_2-health": "$.get('cg_health', {})"},
+         "outputs": {"cg_investigation": "$"}},
     ]
     if with_heal:
         # async re-research dispatches for the collapsed fixtures; the workflow name it
@@ -706,6 +868,7 @@ def _audit_workflow(name, title, desc, scan_command, with_heal=False):
                         "health": "$.get('cg_health', {})",
                         "flagged": "$.get('cg_flagged', [])",
                         "heal_agent": "'%s'" % HEAL_AGENT_NAME,
+                        "belief": "$.get('cg_belief', {})",
                         "max_heal_attempts": "$.get('max_heal_attempts', 3)",
                         "max_fixtures_per_run": "$.get('max_fixtures_per_run', 5)"},
              "outputs": {"cg_healed": "$"}})
@@ -718,6 +881,8 @@ def _audit_workflow(name, title, desc, scan_command, with_heal=False):
          "inputs": {"health": "$.get('cg_health', {})",
                     "assessment": "$.get('cg_summary', {}).get('assessment','')",
                     "healed": "$.get('cg_healed', {})",
+                    "belief": "$.get('cg_belief', {})",
+                    "narrative": "$.get('cg_investigation', {}).get('narrative', '')",
                     "webhook_url": "$TEMP_CONTEXT_VARIABLE_SLACK_WEBHOOK_URL"},
          "outputs": {"cg_notified": "$"}},
         {"name": "save-health", "type": "document",
@@ -777,17 +942,23 @@ def _scan_src_for_tenant():
 def definitions():
     tools = {"name": "context-verify-tools", "title": "Context Verify Tools", "status": "active",
              "description": "deterministic edge scanners (analysis + odds + linkability)",
-             "filename": "context_verify.py", "filetype": "pyscript", "filecontent": _scan_src_for_tenant(),
+             "filename": "context_verify.py", "filetype": "pyscript",
+             "filecontent": _scan_src_for_tenant() + "\n\n# --- embedded verbatim from belief.py (investigator) ---\n" + _belief_src(),
              "commands": [{"name": "Scan", "value": "scan_edges"}, {"name": "ScanOdds", "value": "scan_odds"},
                           {"name": "ScanLink", "value": "scan_link"}, {"name": "ResolveIds", "value": "resolve_link_ids"},
                           {"name": "NotifySlack", "value": "notify_slack"},
-                          {"name": "TriggerAnalysisHeal", "value": "trigger_analysis_heal"}]}
+                          {"name": "TriggerAnalysisHeal", "value": "trigger_analysis_heal"},
+                          {"name": "Investigate", "value": "investigate_edge"}]}
     evaluate = {"name": "context-verify-eval", "title": "Context Verify Eval", "type": "prompt", "status": "active",
                 "description": "edge-agnostic semantic lens over graph-health findings",
                 "instruction": EVAL_INSTR, "schema": EVAL_SCHEMA}
     link_eval = {"name": "context-link-eval", "title": "Context Link Eval", "type": "prompt", "status": "active",
                  "description": "semantic resolver for the market->fixture linkability edge",
                  "instruction": LINK_INSTR, "schema": LINK_SCHEMA}
+    investigate_eval = {"name": "context-investigate-eval", "title": "Context Investigate Eval", "type": "prompt",
+                        "status": "active",
+                        "description": "narrates the investigator's belief state (code decides, LLM narrates)",
+                        "instruction": INVESTIGATE_INSTR, "schema": INVESTIGATE_SCHEMA}
     wf_a = _audit_workflow("context-verify", "Context Verify", "audit the analysis<->fixture edge", "scan_edges",
                             with_heal=bool(ANALYSIS_HEAL_WORKFLOW))
     wf_o = _audit_workflow("context-verify-odds", "Context Verify Odds", "audit the odd<->market<->fixture edge", "scan_odds")
@@ -809,7 +980,7 @@ def definitions():
             "description": "continuous self-healing sweep of the context graph (set status:active to enable)",
             "context": {"config-frequency": 60}, "context-agent": {"limit": "$.get('limit', 200)"},
             "workflows": edge_workflows}
-    defs = [("connector", tools), ("prompt", evaluate), ("prompt", link_eval),
+    defs = [("connector", tools), ("prompt", evaluate), ("prompt", link_eval), ("prompt", investigate_eval),
             ("workflow", wf_a), ("workflow", wf_o), ("workflow", wf_l), ("agent", runner), ("agent", beat)]
     if ANALYSIS_HEAL_WORKFLOW:
         # One async dispatch per fixture to heal: trigger_analysis_heal fires
@@ -858,6 +1029,13 @@ def _run_once():
         if extra:
             print(extra)
         print(f"  assessment : {v.get('assessment','')}")
+        bl = v.get("belief") or {}
+        if bl.get("incident"):
+            print(f"  investigator: {bl.get('explain', '')}")
+            print(f"  decision   : action={bl.get('action')} escalate={bl.get('escalate')} "
+                  f"{bl.get('escalate_reason') or ''}")
+            if v.get("investigation"):
+                print(f"  narrative  : {v.get('investigation')}")
     # self-heal: the persisted recovered links feeding the graph
     hl = _req("POST", "document/search",
               {"filters": {"name": "context_graph_links"}, "sorters": ["created", -1], "page_size": 1}).get("data", [])
@@ -870,9 +1048,68 @@ def _run_once():
             print(f"       healed: {lk.get('bwin_fixture_id')} -> {lk.get('sport_event_id')}  ({lk.get('market')} -> {lk.get('fixture')})")
 
 
+def _replay():
+    """Read-only: what the investigator would have said at each past scan of THIS pod's
+    analysis<->fixture trail. Runs belief.py locally over the persisted history -- the same
+    function the connector runs -- so the POC is demonstrable on any pod with history."""
+    import importlib.util
+    from email.utils import parsedate_to_datetime
+    spec = importlib.util.spec_from_file_location("kit_belief", os.path.join(KIT_DIR, "belief.py"))
+    belief = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(belief)
+    edge = "analysis<->fixture"
+    docs = []
+    for page in range(1, 7):
+        d = _req("POST", "document/search", {"filters": {"name": "context_graph_health"},
+                                              "sorters": ["created", -1], "page": page,
+                                              "page_size": 100}).get("data", []) or []
+        docs += [x for x in d if ((x.get("value") or {}).get("health") or {}).get("edge") == edge]
+        if len(d) < 100:
+            break
+
+    def _created(x):
+        try: return parsedate_to_datetime(x.get("created")).timestamp()
+        except Exception: return 0.0
+    docs.sort(key=_created)
+    heal_configured = bool(ANALYSIS_HEAL_WORKFLOW) or any(
+        ((x.get("value") or {}).get("healed") or {}).get("heal_count") for x in docs)
+    beliefs = belief.replay([x.get("value") or {} for x in docs], edge, heal_configured, 3)
+    print(f"\n=== Investigator replay -- {edge} -- {len(docs)} scan(s) on {BASE} "
+          f"(heal_configured={heal_configured}) ===")
+    print(f"{'created (UTC)':20} {'broken':>6} {'heal':>4} {'stuck':>5}  {'most likely cause':28} {'p':>5}  "
+          f"{'action':10} esc  evidence")
+    for x, bl in zip(docs, beliefs):
+        v = x.get("value") or {}
+        h = v.get("health") or {}
+        hc = (v.get("healed") or {}).get("heal_count") or 0
+        when = str(x.get("created") or "")[5:25]
+        if not bl.get("incident"):
+            print(f"{when:20} {h.get('broken_edges', 0):>6} {hc:>4} {'-':>5}  {'(clean)':28}")
+            continue
+        ev = ",".join(e.split(" (", 1)[0].split("=", 1)[-1] for e in bl.get("evidence") or []) or "priors"
+        print(f"{when:20} {bl['broken']:>6} {hc:>4} {bl['stuck_rounds']:>5}  {bl.get('top', '?'):28} "
+              f"{bl.get('top_p', 0):>5.2f}  {bl['action']:10} {'YES' if bl['escalate'] else 'no ':4} {ev}")
+    esc = [(x, bl) for x, bl in zip(docs, beliefs) if bl.get("escalate")]
+    if esc:
+        x, bl = esc[0]
+        print(f"\n  first escalation would have been at {str(x.get('created'))[5:25]}: {bl.get('escalate_reason')}")
+    if beliefs and beliefs[-1].get("incident"):
+        print(f"\n  latest: {beliefs[-1].get('explain')}")
+    elif docs:
+        print("\n  latest scan is clean -- no open incident on this edge.")
+
+
 def main():
     if not BASE or not TOKEN:
         sys.exit("Set CLIENT_API_URL and API_TOKEN environment variables.")
+    if "--replay" in sys.argv:
+        _replay()
+        return
+    if "--scan" in sys.argv:
+        # one more audit round on an already-provisioned pod (no re-provisioning): the way to
+        # watch the investigator update its belief scan after scan (heal rounds in between).
+        _run_once()
+        return
     defs = definitions()
     if "--teardown" in sys.argv:
         print(f"Tearing down context-verify on {BASE} ...")
