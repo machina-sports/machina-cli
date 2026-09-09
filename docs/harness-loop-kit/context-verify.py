@@ -76,6 +76,7 @@ Usage:
     python3 context-verify.py --run      # provision, run all audits, print graph health
     python3 context-verify.py --teardown # remove
     python3 context-verify.py --replay   # read-only: the investigator's belief at each past scan
+    python3 context-verify.py --scan     # one more audit round, no re-provisioning (watch the belief update)
 
 If this pod stores the same fixture/markets schema under a brand-prefixed doc name
 (check with a document/search sample first — same field names, different `name`),
@@ -1101,6 +1102,11 @@ def main():
         sys.exit("Set CLIENT_API_URL and API_TOKEN environment variables.")
     if "--replay" in sys.argv:
         _replay()
+        return
+    if "--scan" in sys.argv:
+        # one more audit round on an already-provisioned pod (no re-provisioning): the way to
+        # watch the investigator update its belief scan after scan (heal rounds in between).
+        _run_once()
         return
     defs = definitions()
     if "--teardown" in sys.argv:
