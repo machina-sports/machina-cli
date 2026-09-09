@@ -183,6 +183,22 @@ pelo LLM e persistido pra a montagem de contexto do cliente consumir. O agent
 detect → heal → **resolve ids** → persist → repeat. *(Conservador: só links que resolvem a ids
 reais são gravados — o resto fica como órfão.)*
 
+**Investigator (belief state) — `belief.py`.** O heal deixou de decidir "o que fazer em seguida"
+só por **contagem** (mesmo remédio repetido; após 3 rodadas sem progresso, pagina um humano com
+*could NOT self-heal*). Contagem responde *quantas vezes* falhou, não *por quê*. A cada scan de
+uma aresta quebrada o connector calcula uma **distribuição sobre as causas concorrentes**
+(`pipeline_batch_inheritance`, `stale_backlog_draining`, `not_live_false_positive`,
+`heal_mechanism_failing`) a partir de evidências determinísticas — o broken caiu depois da rodada
+de heal? os fixtures flagados são os mesmos? os dispatches erraram? os fixtures são mesmo futuros?
+os grupos foram escritos no mesmo batch do pipeline? — e persiste como `value.belief` no doc
+`context_graph_health`. Regras: **código decide** (hipóteses, priors e likelihoods são tabelas em
+`belief.py`, auditáveis); o prompt `context-investigate-eval` **só narra** para o Slack; a crença
+só pode deixar o heal **mais conservador** (pula o heal que uma causa "não é defeito" explica;
+escala **antes e com motivo**) — o budget legado continua como teto (fail-closed). Nunca é
+chain-of-thought: distribuição + códigos de causa + linhas de evidência. `--replay` mostra o que o
+investigador teria dito em cada scan passado do pod (read-only). A CLI mostra a causa em
+`context-graph status` e os eventos `investigated`/`escalated` em `timeline`.
+
 ## 6.1 `nodes.py` — biblioteca de nós compartilhados (padrão Pressbox)
 
 Os workflows da Machina já são *dados* (tasks + conditions + `$.get()`), mas cada
