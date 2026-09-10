@@ -150,12 +150,43 @@ def _delete_by_name(kind, name):
         _req("DELETE", f"{kind}/{d['_id']}")
 
 
+def _agent_activation(name):
+    """(status, scheduled, config-frequency) of an existing agent, or None. Re-provisioning
+    recreates agents from their INACTIVE defaults; on a pod where a beat was promoted to
+    active (a direct PUT /agent/<id>), that would silently switch the loop off -- the
+    production trap the README warns about. So remember the live activation and restore it."""
+    d = _req("GET", f"agent/{name}").get("data", {})
+    if not (isinstance(d, dict) and d.get("_id")):
+        return None
+    return {"status": d.get("status"), "scheduled": d.get("scheduled"),
+            "frequency": (d.get("context") or {}).get("config-frequency")}
+
+
+def _restore_activation(name, prev):
+    """Put an agent's live activation back after it was recreated (only when it was active)."""
+    if not prev or prev.get("status") != "active":
+        return
+    d = _req("GET", f"agent/{name}").get("data", {})
+    if not (isinstance(d, dict) and d.get("_id")):
+        return
+    body = {"status": "active", "scheduled": bool(prev.get("scheduled"))}
+    if prev.get("frequency") is not None:
+        body["context"] = dict(d.get("context") or {}, **{"config-frequency": prev["frequency"]})
+    res = _req("PUT", f"agent/{d['_id']}", body)
+    ok = res.get("status") in (True, "success")
+    print(f"  {'OK ' if ok else 'ERR'} agent/{name}: activation restored (active, scheduled={body['scheduled']})"
+          + ("" if ok else f"  -> {json.dumps(res.get('error'))[:120]}"))
+
+
 def _create(kind, body):
+    prev = _agent_activation(body["name"]) if kind == "agent" else None
     _delete_by_name(kind, body["name"])
     res = _req("POST", kind, body)
     ok = res.get("status") in (True, "success")
     print(f"  {'OK ' if ok else 'ERR'} {kind}/{body['name']}"
           + ("" if ok else f"  -> {json.dumps(res.get('error'))[:120]}"))
+    if ok and kind == "agent":
+        _restore_activation(body["name"], prev)
     return ok
 
 
