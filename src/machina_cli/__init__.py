@@ -1,3 +1,3 @@
 """Machina CLI - Command line interface for the Machina AI Agent platform."""
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"

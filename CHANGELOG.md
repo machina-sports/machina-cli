@@ -2,7 +2,7 @@
 
 All notable changes to machina-cli are documented here.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-10
 
 ### Added
 - **Investigator catalogs for the other two edges.** `belief.py` now carries hypotheses for `odd<->market<->fixture` (bookmaker id remap vs refresh merge collision vs outright-like markets, which legitimately span fixtures, vs stale unrefreshed markets) and for `surface<->users`, one sub-catalog per verdict (`degraded:odds`: markets not refreshed / bookmaker API failing / widget regression / traffic-mix shift; `degraded:errors`: frontend regression / upstream chat failures / abusive traffic). `scan_odds` emits the evidence (`flagged_id_only`, `flagged_outright_like`, `hours_since_refresh`); the **surface-verify kit** gains an `investigate_surface` step (refresh age of the newest market doc, session spike, exceptions vs chat errors, heal progress), persists `value.belief` on the surface doc, gates the odds heal on the belief and narrates it for Slack via `surface-investigate-eval`. `machina context-graph status` renders the surface belief; `timeline` emits `investigated` / `escalated` for the surface too. These two catalogs were written from the scanners' semantics, not from a live incident yet — treat them as starting priors. New tests exec the surface connector locally, like the context-verify one.
