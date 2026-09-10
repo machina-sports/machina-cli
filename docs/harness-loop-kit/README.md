@@ -202,6 +202,14 @@ investigador teria dito em cada scan passado do pod (read-only). A CLI mostra a 
 o texto "times ainda não definidos" por design e o workflow de pesquisa as descarta — o heal só recebe fixtures com os
 dois times definidos, e grupos só de placeholders são contados à parte (`broken_placeholder_edges`), como os jogos já
 encerrados. Sem isso, 3 de 5 slots do heal eram redespachados toda rodada e o backlog não drenava.
+**Catálogos (v0):** `analysis<->fixture` (validado ao vivo), `odd<->market<->fixture` (remap de id do
+bookmaker vs colisão do merge do refresh vs mercados outright, que legitimamente atravessam fixtures, vs
+markets sem refresh) e `surface<->users` por veredito (`degraded:odds`: markets sem refresh / API do bookmaker
+falhando / regressão do widget / mudança de mix de tráfego; `degraded:errors`: regressão de frontend / falhas
+upstream do chat / tráfego abusivo). `surface-verify.py` ganhou o passo `investigate_surface` (idade do market
+doc mais novo, pico de sessões, exceptions vs chat errors, progresso do heal) e o gate do heal de odds pela
+crença. Os dois catálogos novos foram escritos a partir da semântica dos scanners, ainda sem incidente ao vivo —
+trate os números como prior inicial.
 
 ## 6.1 `nodes.py` — biblioteca de nós compartilhados (padrão Pressbox)
 

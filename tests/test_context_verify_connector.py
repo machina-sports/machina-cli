@@ -212,3 +212,47 @@ def test_stuck_heal_attempts_walks_the_trail(connector):
     assert ns["_stuck_heal_attempts"](13) == 2
     ns = connector([health_doc(7, 5), health_doc(10, 5), health_doc(13, 5)])
     assert ns["_stuck_heal_attempts"](4) == 0
+
+
+# --- odd<->market<->fixture: the investigator's evidence fields -----------------------------
+
+def market(bid, options, market_type="match_winner", updated="Tue, 08 Sep 2026 12:00:00 GMT"):
+    return {"name": "entain-markets-tier3", "created": updated, "updated": updated,
+            "value": {"bwin_fixture_id": bid, "markets_tier3": {market_type: {"options": options}}}}
+
+
+def opt(fid, home, away):
+    return {"fixture_id": fid, "home_team": home, "away_team": away}
+
+
+MARKETS = [
+    market("2:1", [opt("2:1", "Spain", "Austria")]),                                  # consistent
+    market("2:2", [opt("2:99", "Brazil", "Ghana")]),                                   # id-only mismatch
+    market("2:3", [opt("2:3", "USA", "Bosnia"), opt("2:4", "Egypt", "Australia")]),    # merged content
+    market("2:5", [opt("2:5", "Copa do Mundo 2026", "Campeão"), opt("2:6", "Copa do Mundo 2026", "Campeão")],
+           market_type="outright_winner"),                                             # outright-like
+]
+
+
+def test_scan_odds_emits_mismatch_kind_market_kind_and_refresh_age(connector):
+    ns = connector(MARKETS)
+    out = ns["scan_odds"]({"params": {"limit": 200}})
+    h = out["data"]["health"]
+    assert h["sampled"] == 4 and h["misattributed"] == 3 and h["flagged_total"] == 3
+    assert h["flagged_id_only"] == 1 and h["flagged_outright_like"] == 1
+    assert h["hours_since_refresh"] > 0
+    flagged = {f["declared_fixture"]: f for f in out["data"]["flagged"]}
+    assert flagged["2:2"]["id_only"] is True and flagged["2:2"]["fixture_ids"] == ["2:2"]
+    assert flagged["2:3"]["id_only"] is False and flagged["2:3"]["outright_like"] is False
+    assert flagged["2:5"]["outright_like"] is True and flagged["2:5"]["market_types"] == ["outright_winner"]
+
+
+def test_scan_odds_feeds_the_odds_catalog(connector):
+    ns = connector(MARKETS)
+    health = ns["scan_odds"]({"params": {"limit": 200}})["data"]["health"]
+    b = ns["investigate_edge"]({"params": {"health": health, "flagged": [], "heal_agent": ""}})["data"]["belief"]
+    assert b["incident"] is True and b["heal_configured"] is False
+    labels = [e.split(" (")[0] for e in b["evidence"]]
+    # 1/3 id-only and 1/3 outright-like are minorities: content mismatch on match markets
+    assert labels == ["mismatch=content", "market_types=match_like", "refresh_age=stale"]
+    assert b["top"] == "refresh_merge_collision"

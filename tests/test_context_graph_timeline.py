@@ -207,3 +207,30 @@ def test_docs_without_belief_emit_no_investigator_events():
     ]
     events = [e["event"] for e in _events_from_history(docs, [])]
     assert "investigated" not in events and "escalated" not in events
+
+
+def test_surface_belief_adds_investigated_and_escalated_events():
+    docs = [
+        _surface_doc("Wed, 01 Jul 2026 10:00:00 GMT", "ok"),
+        {"created": "Wed, 01 Jul 2026 11:00:00 GMT",
+         "value": {"verdict": "degraded:odds",
+                   "healed": {"healed": [{"season_id": "s1", "status": "executed"}], "heal_count": 1},
+                   "belief": _belief("markets_not_refreshed", 0.57,
+                                     evidence=("refresh_age=stale (newest market doc is 30.0h old)",))}},
+        {"created": "Wed, 01 Jul 2026 12:00:00 GMT",
+         "value": {"verdict": "degraded:odds",
+                   "belief": _belief("widget_regression", 0.57, True,
+                                     "widget_regression (57%) has no automatable remedy",
+                                     evidence=("progress=stuck_1 (1 -> 1 after 1 heal round(s))",))}},
+        _surface_doc("Wed, 01 Jul 2026 13:00:00 GMT", "ok"),
+    ]
+    events = _events_from_history([], docs)
+    kinds = [(e["event"], e["ts"].hour) for e in events]
+    assert kinds == [
+        ("detected", 11), ("heal", 11), ("investigated", 11),
+        ("investigated", 12), ("escalated", 12),
+        ("recovered", 13),
+    ]
+    assert events[2]["detail"] == "most likely markets_not_refreshed (57%) — refresh_age=stale"
+    assert events[3]["detail"] == "most likely widget_regression (57%) — progress=stuck_1"
+    assert all(e["edge"] == "surface<->users" for e in events)

@@ -56,7 +56,9 @@ likelihoods are tables in belief.py); the `context-investigate-eval` prompt only
 for Slack. The belief can only make healing MORE conservative (skip a heal a not-a-defect
 cause explains; escalate earlier WITH a reason); the legacy no-progress budget stays as the
 hard cap. `--replay` shows what the investigator would have said at each past scan of the
-pod's existing trail (read-only, no provisioning).
+pod's existing trail (read-only, no provisioning). Catalogs: analysis<->fixture (validated live)
+and odd<->market<->fixture (detect-only: id-remap vs merge-collision vs outright markets vs
+stale refresh -- written from the scanner's semantics, not from a live incident yet).
 
 Provisions:
   connector context-verify-tools     scan_edges + scan_odds + scan_link
@@ -161,7 +163,7 @@ def _create(kind, body):
 SCAN_SRC = r'''"""Context Graph edge scanners (analysis, odds, linkability)."""
 import json, os, re, unicodedata, urllib.request, urllib.error
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 def _docs(name, extra, limit):
@@ -386,18 +388,34 @@ def scan_edges(request_data: dict) -> dict:
               "placeholder_ids": placeholder_ids}
     return {"status": True, "data": {"health": health, "flagged": flagged, "heal_needed": broken > 0}}
 
+# Market types / labels that legitimately span several fixtures (outrights, group winners,
+# top scorer, specials): identical options across fixtures there are not a misattribution.
+# Word-bounded on purpose: "match_winner" is a match market ("_" is a word character, so
+# \bwinner\b does not fire inside it), while "outright_winner", "tournament winner",
+# "Campeão", "Melhor Seleção Africana" are the outright-like labels seen live.
+OUTRIGHT_LIKE = re.compile(r"\b(outright\w*|winner|vencedor\w*|campe\w*|group\w*|grupo\w*|top_?scorer|"
+                           r"artilheiro\w*|especial|special\w*|futures?|to_?win|qualif\w*|classific\w*|melhor|best)\b", re.I)
+
 def scan_odds(request_data: dict) -> dict:
-    """odd <-> market <-> fixture: a market's options must reference the fixture it declares."""
+    """odd <-> market <-> fixture: a market's options must reference the fixture it declares.
+
+    Besides the count, emits the investigator's evidence: how many flagged docs differ from
+    their declared fixture by ID ONLY (same teams -- a bookmaker id remap) vs mix content from
+    several fixtures (a refresh merge), how many are outright-like markets (expected to span
+    fixtures), and how old the newest market doc is (is the refresh even running?)."""
     p = request_data.get("params", {}) or request_data
     try: docs = _docs("entain-markets-tier3", {}, _limit(p))
     except Exception as ex:
         return {"status": True, "data": {"health": {"edge": "odd<->market<->fixture", "error": str(ex)}, "flagged": []}}
-    n = broken = 0; flagged = []
+    n = broken = id_only_n = outright_n = 0; flagged = []; newest = None
     for d in docs:
         v = d.get("value", {}) or {}; top = v.get("bwin_fixture_id")
-        fids, teams = set(), set()
-        for _mt, md in (v.get("markets_tier3") or {}).items():
+        ts = _ts(d.get("updated") or d.get("created"))
+        if ts is not None and (newest is None or ts > newest): newest = ts
+        fids, teams, mtypes = set(), set(), set()
+        for mt, md in (v.get("markets_tier3") or {}).items():
             if not isinstance(md, dict): continue
+            mtypes.add(str(mt))
             for o in md.get("options", []) or []:
                 if not isinstance(o, dict): continue
                 if o.get("fixture_id"): fids.add(o["fixture_id"])
@@ -408,11 +426,18 @@ def scan_odds(request_data: dict) -> dict:
         bad = (bool(fids) and (len(fids) > 1 or (top and top not in fids))) or (len(teams) > 1)
         if bad:
             broken += 1
+            id_only = len(teams) <= 1 and len(fids) == 1 and bool(top) and top not in fids
+            outright = any(OUTRIGHT_LIKE.search(str(x)) for x in list(mtypes) + [t for pr in teams for t in pr if t])
+            id_only_n += int(id_only); outright_n += int(outright)
             if len(flagged) < 10:
-                flagged.append({"declared_fixture": top, "option_fixtures": sorted(fids)[:4],
-                                "pairings": [list(t) for t in list(teams)[:4]]})
+                flagged.append({"declared_fixture": top, "fixture_ids": [top] if top else [],
+                                "option_fixtures": sorted(fids)[:4], "pairings": [list(t) for t in list(teams)[:4]],
+                                "market_types": sorted(mtypes)[:4], "id_only": id_only, "outright_like": outright})
     health = {"edge": "odd<->market<->fixture", "sampled": n, "misattributed": broken,
-              "broken_rate_pct": round(100 * broken / n) if n else 0}
+              "broken_rate_pct": round(100 * broken / n) if n else 0,
+              "flagged_total": broken, "flagged_id_only": id_only_n, "flagged_outright_like": outright_n}
+    if newest is not None:
+        health["hours_since_refresh"] = round((datetime.now(timezone.utc).timestamp() - newest) / 3600, 1)
     return {"status": True, "data": {"health": health, "flagged": flagged}}
 
 def scan_link(request_data: dict) -> dict:
