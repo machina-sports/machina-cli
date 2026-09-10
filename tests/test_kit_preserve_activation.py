@@ -64,7 +64,7 @@ def test_active_beat_is_restored_after_recreation(kit, monkeypatch, capsys):
     assert mod._create("agent", dict(BEAT)) is True
     puts = [c for c in api.calls if c[0] == "PUT"]
     assert len(puts) == 1
-    method, path, body = puts[0]
+    _, path, body = puts[0]
     assert path == "agent/new-id" and body["status"] == "active" and body["scheduled"] is False
     assert body["context"]["config-frequency"] == 60
     assert "activation restored" in capsys.readouterr().out
