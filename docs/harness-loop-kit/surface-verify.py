@@ -120,12 +120,43 @@ def _delete_by_name(kind, name):
         _req("DELETE", f"{kind}/{d['_id']}")
 
 
+def _agent_activation(name):
+    """(status, scheduled, config-frequency) of an existing agent, or None. Re-provisioning
+    recreates agents from their INACTIVE defaults; on a pod where a beat was promoted to
+    active (a direct PUT /agent/<id>), that would silently switch the loop off -- the
+    production trap the README warns about. So remember the live activation and restore it."""
+    d = _req("GET", f"agent/{name}").get("data", {})
+    if not (isinstance(d, dict) and d.get("_id")):
+        return None
+    return {"status": d.get("status"), "scheduled": d.get("scheduled"),
+            "frequency": (d.get("context") or {}).get("config-frequency")}
+
+
+def _restore_activation(name, prev):
+    """Put an agent's live activation back after it was recreated (only when it was active)."""
+    if not prev or prev.get("status") != "active":
+        return
+    d = _req("GET", f"agent/{name}").get("data", {})
+    if not (isinstance(d, dict) and d.get("_id")):
+        return
+    body = {"status": "active", "scheduled": bool(prev.get("scheduled"))}
+    if prev.get("frequency") is not None:
+        body["context"] = dict(d.get("context") or {}, **{"config-frequency": prev["frequency"]})
+    res = _req("PUT", f"agent/{d['_id']}", body)
+    ok = res.get("status") in (True, "success")
+    print(f"  {'OK ' if ok else 'ERR'} agent/{name}: activation restored (active, scheduled={body['scheduled']})"
+          + ("" if ok else f"  -> {json.dumps(res.get('error'))[:120]}"))
+
+
 def _create(kind, body):
+    prev = _agent_activation(body["name"]) if kind == "agent" else None
     _delete_by_name(kind, body["name"])
     res = _req("POST", kind, body)
     ok = res.get("status") in (True, "success")
     print(f"  {'OK ' if ok else 'ERR'} {kind}/{body['name']}"
-          + ("" if ok else f"  -> {json.dumps(res.get('error'))[:140]}"))
+          + ("" if ok else f"  -> {json.dumps(res.get('error'))[:120]}"))
+    if ok and kind == "agent":
+        _restore_activation(body["name"], prev)
     return ok
 
 
@@ -607,12 +638,9 @@ def main():
             print(f"  removed {kind}/{body['name']}")
         return
     print(f"Provisioning surface-verify on {BASE} (posthog project={PH_PROJECT}) ...")
-    # CAUTION when re-running against a pod where the beat was since promoted to
-    # active (e.g. via a direct PUT /agent/<id>): `beat` above defaults to
-    # status="inactive", so this overwrites it back off. If surface-watch-beat is
-    # live in this pod, re-activate it after provisioning (or provision just the
-    # connector + workflow entries, skipping the agent, to update the code without
-    # touching the running beat's status).
+    # Re-running against a pod where a beat was promoted to active: _create remembers the
+    # live activation (status / scheduled / config-frequency) and restores it after the
+    # agent is recreated, so provisioning never silently switches a running loop off.
     ok = all(_create(kind, body) for kind, body in defs)
     if SLACK_WEBHOOK_URL:
         # Same posture as the PostHog key: a config document notify_slack reads at
