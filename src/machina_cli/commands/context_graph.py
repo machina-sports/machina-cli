@@ -212,6 +212,8 @@ def _render_one(name: str, pid: str, st: dict) -> None:
         sig = f"sessions {h.get('sessions', h.get('users', 0))} · {h.get('exceptions', 0)} exc · err/s {h.get('err_per_session', h.get('err_per_user', 0))}"
         v, color, sig = _apply_staleness(v, color, sig, st.get("surface_seen", ""))
         console.print(f"  surface [bold]odds/errors[/]        [{color}]{v:9}[/] [dim]{sig}[/]")
+        for line, style in _belief_lines(s.get("belief") or {}):
+            console.print(f"       [{style}]{line}[/]")
     for an in SELF_HEAL_AGENTS:
         a = st["agents"].get(an)
         if not a:
@@ -342,6 +344,35 @@ def _parse_created(doc: dict):
         return None
 
 
+def _belief_events(events: list, ts, edge: str, belief, prev_top, prev_escalate) -> tuple:
+    """Emit `investigated` (leading cause appeared/changed) and `escalated` (belief flipped
+    to "needs a human") for one reading; returns the state to carry to the next reading."""
+    incident = isinstance(belief, dict) and bool(belief.get("incident"))
+    top = belief.get("top") if incident else None
+    if top and top != prev_top:
+        pct = round((belief.get("top_p") or 0) * 100)
+        ev = belief.get("evidence") or []
+        why = f" — {ev[0].split(' (', 1)[0]}" if ev else " — on priors"
+        events.append(
+            {
+                "ts": ts,
+                "edge": edge,
+                "event": "investigated",
+                "detail": f"most likely {top} ({pct}%){why}",
+            }
+        )
+    if incident and belief.get("escalate") and not prev_escalate:
+        events.append(
+            {
+                "ts": ts,
+                "edge": edge,
+                "event": "escalated",
+                "detail": belief.get("escalate_reason") or "investigator: needs a human",
+            }
+        )
+    return top, (bool(belief.get("escalate")) if incident else False)
+
+
 def _events_from_history(health_docs: list, surface_docs: list) -> list:
     """Reconstruct self-healing events from the persisted graph-health trail.
 
@@ -403,31 +434,9 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                         "detail": f"no progress after {healed.get('prior_attempts', '?')} rounds — needs a human",
                     }
                 )
-            incident = isinstance(belief, dict) and bool(belief.get("incident"))
-            top = belief.get("top") if incident else None
-            if top and top != prev_top:
-                pct = round((belief.get("top_p") or 0) * 100)
-                ev = belief.get("evidence") or []
-                why = f" — {ev[0].split(' (', 1)[0]}" if ev else " — on priors"
-                events.append(
-                    {
-                        "ts": ts,
-                        "edge": edge,
-                        "event": "investigated",
-                        "detail": f"most likely {top} ({pct}%){why}",
-                    }
-                )
-            if incident and belief.get("escalate") and not prev_escalate:
-                events.append(
-                    {
-                        "ts": ts,
-                        "edge": edge,
-                        "event": "escalated",
-                        "detail": belief.get("escalate_reason") or "investigator: needs a human",
-                    }
-                )
-            prev_top = top
-            prev_escalate = bool(belief.get("escalate")) if incident else False
+            prev_top, prev_escalate = _belief_events(
+                events, ts, edge, belief, prev_top, prev_escalate
+            )
             if broken == 0 and prev_broken > 0:
                 events.append(
                     {
@@ -448,10 +457,11 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
         ts = _parse_created(doc)
         if ts is None:
             continue
-        srows.append((ts, v.get("verdict") or "?", v.get("healed") or {}))
+        srows.append((ts, v.get("verdict") or "?", v.get("healed") or {}, v.get("belief") or {}))
     srows.sort(key=lambda r: r[0])
     prev_v = None
-    for ts, verdict, healed in srows:
+    prev_top, prev_escalate = None, False  # investigator state across the incident
+    for ts, verdict, healed, belief in srows:
         if verdict in _DEGRADED and verdict != prev_v:
             events.append(
                 {"ts": ts, "edge": "surface<->users", "event": "detected", "detail": verdict}
@@ -475,6 +485,9 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                     "detail": "retry budget exceeded — needs a human",
                 }
             )
+        prev_top, prev_escalate = _belief_events(
+            events, ts, "surface<->users", belief, prev_top, prev_escalate
+        )
         if verdict not in _DEGRADED and prev_v in _DEGRADED:
             events.append(
                 {
@@ -484,6 +497,7 @@ def _events_from_history(health_docs: list, surface_docs: list) -> list:
                     "detail": f"back to {verdict} (was {prev_v})",
                 }
             )
+            prev_top, prev_escalate = None, False
         prev_v = verdict
 
     events.sort(key=lambda e: e["ts"])

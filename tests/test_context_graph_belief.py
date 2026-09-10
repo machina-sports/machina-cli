@@ -43,14 +43,19 @@ KNOWN_BATCH = {"live_groups": 4, "batch_groups": 4, "live_ids": 13, "unknown_sta
 
 def test_priors_sum_to_one_and_posterior_is_normalized():
     for edge, hs in belief.HYPOTHESES.items():
-        assert math.isclose(sum(h["prior"] for h in hs), 1.0, abs_tol=1e-9), edge
+        groups: dict = {}
+        for h in hs:  # verdict edges carry one sub-catalog per verdict
+            groups.setdefault(tuple(h.get("verdicts") or ()), []).append(h["prior"])
+        for verdicts, priors in groups.items():
+            assert math.isclose(sum(priors), 1.0, abs_tol=1e-9), (edge, verdicts)
     post = belief.update(EDGE, [("progress=stuck_2plus", ""), ("batch=signature", "")])
     assert math.isclose(sum(x["p"] for x in post), 1.0, abs_tol=2e-3)
     assert post == sorted(post, key=lambda x: -x["p"])
 
 
 def test_every_likelihood_row_names_only_known_causes():
-    causes = {h["cause"] for h in belief.HYPOTHESES[EDGE]}
+    causes = {h["cause"] for hs in belief.HYPOTHESES.values() for h in hs}
+    assert len(causes) == sum(len(hs) for hs in belief.HYPOTHESES.values())  # unique across edges
     for label, row in belief.LIKELIHOOD.items():
         assert set(row) <= causes, label
 
@@ -64,17 +69,19 @@ def test_scan_error_and_unknown_edges_degrade_to_no_belief():
     assert belief.investigate(EDGE, {"edge": EDGE, "error": "boom"}, [], [])["scan_error"] is True
     b = belief.investigate("market->fixture(link)", {"edge": "market->fixture(link)"}, [], [])
     assert b["unsupported_edge"] is True and b["incident"] is False
-    # the odds edge has a count but no hypothesis catalog yet: an incident without a belief
-    b = belief.investigate("odd<->market<->fixture", {"edge": "odd<->market<->fixture", "misattributed": 3}, [], [])
-    assert b["incident"] is True and b["hypotheses"] == [] and b["action"] == "none"
+    # the odds edge is detect-only: an incident with a catalog, no heal to run
+    b = belief.investigate("odd<->market<->fixture", {"edge": "odd<->market<->fixture", "misattributed": 3}, [], [],
+                           heal_configured=False)
+    assert b["incident"] is True and len(b["hypotheses"]) == 4 and b["action"] == "none"
+    assert b["top"] == "refresh_merge_collision"  # highest prior, first reading
 
 
 def test_stuck_rounds_mirror_the_legacy_budget_semantics():
     draining = [_scan(7, 5, IDS[:7]), _scan(10, 5, IDS[:10]), _scan(13, 5, IDS)]  # newest first
-    assert belief.stuck_rounds(4, draining) == 0  # 13 -> 10 -> 7 -> 4: every round helped
+    assert belief.stuck_rounds(EDGE, 4, draining) == 0  # 13 -> 10 -> 7 -> 4: every round helped
     stuck = [_scan(13, 5, IDS), _scan(13, 5, IDS), _scan(0)]
-    assert belief.stuck_rounds(13, stuck) == 2  # 13 -> 13 -> 13: two rounds, no progress
-    assert belief.stuck_rounds(13, [_scan(13, None, IDS)]) == 0  # no heal attempted = no round
+    assert belief.stuck_rounds(EDGE, 13, stuck) == 2  # 13 -> 13 -> 13: two rounds, no progress
+    assert belief.stuck_rounds(EDGE, 13, [_scan(13, None, IDS)]) == 0  # no heal attempted = no round
 
 
 def test_stuck_incident_escalates_with_a_reason_and_keeps_healing():
@@ -154,7 +161,7 @@ def test_detect_only_pod_drops_heal_only_hypotheses_and_escalates():
     assert {h["cause"] for h in b["hypotheses"]} == {
         "pipeline_batch_inheritance", "stale_backlog_draining", "not_live_false_positive"}
     assert b["action"] == "none" and b["escalate"] is True
-    assert "not configured" in b["escalate_reason"]
+    assert "no auto-heal is wired" in b["escalate_reason"]
 
 
 def test_belief_never_dispatches_more_than_the_budget():
@@ -190,3 +197,119 @@ def test_explain_line_names_top_evidence_and_runner_up():
 def test_investigate_tolerates_garbage_history(bad):
     b = belief.investigate(EDGE, {"edge": EDGE, "broken_edges": 2}, [], [bad])
     assert b["incident"] is True
+
+
+# --- odd<->market<->fixture catalog (detect-only edge) -------------------------------------
+
+ODDS = "odd<->market<->fixture"
+
+
+def _odds(broken, id_only=0, outright=0, age=1.0, ids=()):
+    h = {"edge": ODDS, "misattributed": broken, "flagged_total": broken, "flagged_id_only": id_only,
+         "flagged_outright_like": outright, "hours_since_refresh": age}
+    return {"health": h, "flagged": [{"fixture_ids": [i]} for i in ids]}
+
+
+def test_odds_id_only_mismatch_points_at_a_bookmaker_remap():
+    b = belief.investigate(ODDS, _odds(6, id_only=5, outright=0, age=2.0)["health"], [], [], heal_configured=False)
+    assert b["top"] == "bookmaker_id_remap" and b["top_p"] >= 0.5
+    labels = [e.split(" (")[0] for e in b["evidence"]]
+    assert labels == ["mismatch=id_only", "market_types=match_like", "refresh_age=fresh"]
+    assert b["action"] == "none" and b["escalate"] is True  # nothing automatable here: a human
+
+
+def test_odds_mixed_content_points_at_the_refresh_merge():
+    b = belief.investigate(ODDS, _odds(6, id_only=0, outright=0, age=2.0)["health"], [], [], heal_configured=False)
+    assert b["top"] == "refresh_merge_collision" and b["top_p"] >= 0.5
+
+
+def test_odds_outright_markets_are_not_a_defect():
+    b = belief.investigate(ODDS, _odds(6, id_only=0, outright=6, age=2.0)["health"], [], [], heal_configured=False)
+    assert b["top"] == "multi_fixture_market_expected" and b["top_p"] >= 0.5
+    assert b["action"] == "none" and b["escalate"] is False  # expected, no page
+
+
+def test_odds_stale_markets_rise_when_nothing_has_refreshed():
+    fresh = belief.investigate(ODDS, _odds(6, age=1.0)["health"], [], [], heal_configured=False)
+    stale = belief.investigate(ODDS, _odds(6, age=30.0)["health"], [], [], heal_configured=False)
+    p = lambda b, c: next(h["p"] for h in b["hypotheses"] if h["cause"] == c)
+    assert p(stale, "stale_unrefreshed_markets") > p(fresh, "stale_unrefreshed_markets") * 3
+    assert stale["hypotheses"][1]["cause"] == "stale_unrefreshed_markets"
+
+
+def test_odds_new_flagged_markets_between_scans_count_as_new_breakage():
+    trail = [_odds(0), _odds(3, ids=("2:1", "2:2", "2:3")), _odds(3, ids=("2:7", "2:8", "2:9"))]
+    b = belief.replay(trail, ODDS, heal_configured=False)[2]
+    assert any(e.startswith("new_groups=new_breakage") for e in b["evidence"])
+
+
+# --- surface<->users catalog (verdict edge) ----------------------------------------------
+
+SURF = "surface<->users"
+
+
+def _surf(verdict, sessions=500, exceptions=0, chat_err=0, age=None, heal=None, heal_items=None):
+    h = {"edge": SURF, "verdict": verdict, "sessions": sessions, "exceptions": exceptions, "chat_err": chat_err}
+    if age is not None:
+        h["hours_since_refresh"] = age
+    v = {"health": h, "verdict": verdict}
+    if heal is not None:
+        v["healed"] = {"heal_count": heal, "healed": heal_items or [{"season_id": "s1", "status": "executed"}]}
+    return v
+
+
+def test_surface_ok_is_not_an_incident_and_verdict_selects_the_catalog():
+    assert belief.investigate(SURF, _surf("ok")["health"], [], [])["incident"] is False
+    odds = belief.investigate(SURF, _surf("degraded:odds", age=30.0)["health"], [], [], heal_configured=True)
+    errs = belief.investigate(SURF, _surf("degraded:errors", exceptions=40, chat_err=2)["health"], [], [],
+                              heal_configured=False)
+    assert {h["cause"] for h in odds["hypotheses"]} == {
+        "markets_not_refreshed", "bookmaker_api_failure", "widget_regression", "traffic_mix_shift"}
+    assert {h["cause"] for h in errs["hypotheses"]} == {
+        "frontend_regression", "upstream_chat_failures", "abusive_traffic"}
+    assert odds["verdict"] == "degraded:odds" and errs["verdict"] == "degraded:errors"
+
+
+def test_surface_stale_markets_first_scan_heals():
+    b = belief.investigate(SURF, _surf("degraded:odds", age=30.0)["health"], [], [], heal_configured=True)
+    assert b["top"] == "markets_not_refreshed" and b["action"] == "heal" and b["escalate"] is False
+
+
+def test_surface_fresh_markets_after_a_clean_heal_point_at_the_widget():
+    trail = [_surf("ok"), _surf("degraded:odds", age=0.5, heal=1), _surf("degraded:odds", age=0.3, heal=1)]
+    b = belief.replay(trail, SURF, heal_configured=True)[2]
+    labels = [e.split(" (")[0] for e in b["evidence"]]
+    assert "progress=stuck_1" in labels and "dispatch=clean" in labels and "refresh_age=fresh" in labels
+    assert b["top"] == "widget_regression" and b["top_p"] >= 0.5
+    assert b["action"] == "skip_heal" and b["escalate"] is True  # refreshing again will not help
+
+
+def test_surface_heal_errors_with_stale_markets_point_at_the_bookmaker_api():
+    err = [{"season_id": "s1", "error": "HTTP 502"}]
+    trail = [_surf("ok"), _surf("degraded:odds", age=30.0, heal=1, heal_items=err),
+             _surf("degraded:odds", age=30.5, heal=1, heal_items=err)]
+    b = belief.replay(trail, SURF, heal_configured=True)[2]
+    assert b["top"] == "bookmaker_api_failure" and b["top_p"] >= 0.7
+    assert b["escalate"] is True and "no automatable remedy" in b["escalate_reason"]
+
+
+def test_surface_session_spike_without_errors_reads_as_traffic_mix():
+    trail = [_surf("ok", sessions=300), _surf("degraded:odds", sessions=900, age=0.5)]
+    b = belief.replay(trail, SURF, heal_configured=True)[1]
+    assert any(e.startswith("sessions=spike") for e in b["evidence"])
+    assert b["top"] == "traffic_mix_shift"
+
+
+def test_surface_error_mix_separates_frontend_from_upstream():
+    fe = belief.investigate(SURF, _surf("degraded:errors", exceptions=40, chat_err=2)["health"], [],
+                            [_surf("ok", sessions=480)], heal_configured=False)
+    up = belief.investigate(SURF, _surf("degraded:errors", exceptions=2, chat_err=40)["health"], [],
+                            [_surf("ok", sessions=480)], heal_configured=False)
+    assert fe["top"] == "frontend_regression" and fe["top_p"] >= 0.7
+    assert up["top"] == "upstream_chat_failures" and up["top_p"] >= 0.7
+    assert fe["escalate"] is True and fe["action"] == "none"  # no heal exists for errors
+
+
+def test_surface_stuck_rounds_count_degraded_scans_with_a_heal():
+    hist = [_surf("degraded:odds", heal=1), _surf("degraded:odds", heal=1), _surf("ok")]  # newest first
+    assert belief.stuck_rounds(SURF, 1, hist) == 2
