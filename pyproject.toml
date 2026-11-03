@@ -30,6 +30,9 @@ dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0",
     "sports-skills>=0.20.1",
+    # Official MCP SDK: real handshake + tools/list for `machina mcp`/`connect`.
+    # Same major as the client-api MCP server (mcp==1.28.1); 2.x reshapes the API.
+    "mcp>=1.28,<2",
 ]
 
 [project.urls]

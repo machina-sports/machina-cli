@@ -253,7 +253,9 @@ def connect_command(
     project_id: str = typer.Argument(None, help="Project ID (defaults to the selected project)"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     reveal: bool = typer.Option(False, "--reveal", help="Show the auth token (masked by default)"),
-    probe: bool = typer.Option(False, "--probe", help="Verify the SSE endpoint is reachable"),
+    probe: bool = typer.Option(
+        False, "--probe", help="Verify readiness: MCP handshake, tools/list and a health_check read"
+    ),
     name: str = typer.Option(
         None, "--name", "-n", help="Server name for the agent (defaults to project id)"
     ),
@@ -263,9 +265,10 @@ def connect_command(
     org: str = typer.Option(
         None, "--org", "-o", help="Organization ID for --mint (defaults to the selected org)"
     ),
+    timeout: float = typer.Option(15.0, "--timeout", help="Probe timeout in seconds"),
 ):
     """Resolve a project's MCP connection for an external agent (e.g. sportsclaw)."""
-    connect.run(project_id, json_output, reveal, probe, name, mint, org)
+    connect.run(project_id, json_output, reveal, probe, name, mint, org, timeout)
 
 
 @app.command(rich_help_panel="Session")
