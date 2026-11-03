@@ -84,7 +84,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[CommandSpec, ...]], ...] = (
             CommandSpec("template", ("list", "install", "push"), "Template compatibility surface"),
             CommandSpec("deploy", ("start", "status", "restart"), "Deployments"),
             CommandSpec("config", ("list", "set", "get"), "Configuration"),
-            CommandSpec("mcp", ("url",), "Resolve an MCP endpoint"),
+            CommandSpec("mcp", ("url", "tools"), "Resolve an MCP endpoint; discover its tools"),
         ),
     ),
 )

@@ -15,8 +15,9 @@ import json
 
 import typer
 from rich.console import Console
+from rich.text import Text
 
-from machina_cli import mcp_session
+from machina_cli import mcp_session, ui
 from machina_cli.config import get_config, resolve_auth_token
 from machina_cli.mcp_session import MCPConnectError
 from machina_cli.project_client import ProjectClient
@@ -141,3 +142,126 @@ def url(
         )
     else:
         console.print("[dim]Unverified — pass --probe to connect and check readiness.[/dim]")
+
+
+TOOLS_SCHEMA = "machina.mcp.tools/v1"
+
+
+def _summary(description: str | None) -> str:
+    """First non-empty line of a served description (display only, not rewritten)."""
+    for line in (description or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _compact(tool) -> dict:
+    """Compact view of one served tool. Only fields the server supplied — no
+    inferred "executable"/prerequisite flags; `required` is read from inputSchema."""
+    schema = tool.inputSchema or {}
+    return {
+        "name": tool.name,
+        "title": tool.title,
+        "summary": _summary(tool.description),
+        "required": list(schema.get("required") or []),
+    }
+
+
+def _matches(tool, query: str) -> bool:
+    haystack = " ".join(filter(None, [tool.name, tool.title, tool.description])).lower()
+    return query.lower() in haystack
+
+
+@app.command()
+def tools(
+    project_id: str | None = typer.Argument(
+        None, help="Project ID (defaults to the selected project)"
+    ),
+    search: str | None = typer.Option(
+        None, "--search", "-s", help="Case-insensitive match on tool name/title/description"
+    ),
+    describe: str | None = typer.Option(
+        None, "--describe", "-d", help="Show one tool exactly as served (incl. input schema)"
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    timeout: float = typer.Option(
+        mcp_session.DEFAULT_TIMEOUT, "--timeout", help="Connection timeout in seconds"
+    ),
+):
+    """Discover the project's MCP tools (read-only: lists, never calls a tool).
+
+    Walks the server's full tools/list pagination, then filters with --search.
+    --describe prints one tool's name, description and input/output schema
+    exactly as the server serves them.
+    """
+    project_id, base_url = resolve_base_url(project_id, json_output)
+    try:
+        meta, served = mcp_session.run(
+            base_url, resolve_auth_token(), mcp_session.list_all_tools, timeout
+        )
+    except MCPConnectError as error:
+        fail(error, json_output)
+
+    connection = {
+        "project_id": project_id,
+        "url": meta["url"],
+        "transport": meta["transport"],
+        "protocol_version": meta["protocol_version"],
+    }
+
+    if describe:
+        match = next((tool for tool in served if tool.name == describe), None)
+        if match is None:
+            fail(
+                MCPConnectError("tool_not_found", f"no tool named '{describe}' on this server"),
+                json_output,
+            )
+        detail = match.model_dump(by_alias=True, exclude_none=True, mode="json")
+        if json_output:
+            print(json.dumps({"schema": TOOLS_SCHEMA, **connection, "tool": detail}))
+            return
+        console.print(f"[bold]{match.name}[/bold]" + (f"  {match.title}" if match.title else ""))
+        if match.description:
+            console.print(Text(match.description))
+        console.print("\n[bold]Input schema[/bold]")
+        console.print_json(json.dumps(match.inputSchema or {}))
+        if match.outputSchema:
+            console.print("\n[bold]Output schema[/bold]")
+            console.print_json(json.dumps(match.outputSchema))
+        return
+
+    selected = [tool for tool in served if not search or _matches(tool, search)]
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "schema": TOOLS_SCHEMA,
+                    **connection,
+                    "search": search,
+                    "total": len(served),
+                    "count": len(selected),
+                    "tools": [_compact(tool) for tool in selected],
+                }
+            )
+        )
+        return
+
+    if not selected:
+        ui.empty_state("tools matching the search" if search else "tools")
+        return
+    table = ui.make_table(f"MCP tools · {project_id} ({meta['transport']})")
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Summary")
+    table.add_column("Required")
+    for tool in selected:
+        row = _compact(tool)
+        table.add_row(
+            ui.cell(row["name"]), ui.cell(row["summary"]), ui.cell(", ".join(row["required"]))
+        )
+    console.print(table)
+    console.print(
+        Text(
+            f"{len(selected)} of {len(served)} tools · --describe <name> for the input schema",
+            style=ui.MUTED,
+        )
+    )
