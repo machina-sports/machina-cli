@@ -123,7 +123,18 @@ def use(
     project_id: str = typer.Argument(..., help="Project ID to set as default"),
 ):
     """Set default project."""
+    previous = get_config("default_project_id")
     set_config("default_project_id", project_id)
+
+    # A direct `client_api_url` (Factory sandbox, CI/CD) belongs to the project
+    # that was default when it was configured. Keeping it after a switch would
+    # send the new project's requests -- and credentials -- to the old host.
+    if previous != project_id and get_config("client_api_url"):
+        set_config("client_api_url", "")
+        console.print(
+            "[yellow]Cleared client_api_url: it pointed at the previous project's "
+            "client-api.[/yellow]"
+        )
 
     # Try to resolve project name for display and shell prompt
     try:

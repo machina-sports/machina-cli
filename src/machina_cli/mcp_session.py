@@ -53,6 +53,8 @@ HINTS = {
     "health_check_failed": (
         "The MCP server is up but its health_check read failed; the project API may be degraded."
     ),
+    "tool_failed": "The MCP tool returned an error; see the message for the server's reason.",
+    "not_found": "Nothing with that name or id exists in this project.",
 }
 
 
@@ -179,6 +181,11 @@ def _classify(exc: BaseException, url: str, transport: str) -> MCPConnectError:
     )
 
 
+# Read-only project searches the probe may use to prove the credential, in
+# order of preference. Product profiles that expose none of them are reported
+# with authenticated_read=None (credential not proven by the probe).
+_AUTH_READ_TOOLS = ("search_agents", "search_workflows", "search_documents")
+
 _DENIAL_PATTERNS = (
     (re.compile(r"HTTP 401"), "expired_credentials"),
     (re.compile(r"HTTP 403"), "access_denied"),
@@ -209,12 +216,55 @@ def tool_payload(result: Any) -> tuple[bool, Any, str]:
     return bool(result.isError), data, text
 
 
-def tool_error(name: str, text: str, url: str | None = None) -> MCPConnectError:
+def tool_error(
+    name: str, text: str, url: str | None = None, code: str = "tool_failed"
+) -> MCPConnectError:
     """Map an isError tool result onto the typed error map (auth denials first)."""
-    for pattern, code in _DENIAL_PATTERNS:
+    for pattern, denial in _DENIAL_PATTERNS:
         if pattern.search(text or ""):
-            return MCPConnectError(code, f"{name} was denied: {code.replace('_', ' ')}", url=url)
-    return MCPConnectError("health_check_failed", f"{name} returned an error", url=url)
+            return MCPConnectError(
+                denial, f"{name} was denied: {denial.replace('_', ' ')}", url=url
+            )
+    return MCPConnectError(code, f"{name} returned an error", url=url)
+
+
+def unwrap(name: str, data: Any) -> Any:
+    """Peel the proxy envelopes ({"status", "data"}) a client-api MCP tool returns.
+
+    The MCP layer wraps the REST body ({"status": true, "data": ...}); either
+    layer may report failure (`status` "error"/false, or `error_code`). A failure
+    raises a typed error — an envelope that *says* error is never success data.
+    """
+    # Only envelope statuses are peeled: a resource's own `status` (a skill's
+    # "available", a run's "executed") ends the walk and is returned as data.
+    while isinstance(data, dict) and (
+        data.get("status") in ("success", True, "error", False) or data.get("error_code")
+    ):
+        if data.get("status") in ("error", False) or data.get("error_code"):
+            error = data.get("error")
+            message = (
+                (error.get("message") if isinstance(error, dict) else error)
+                or data.get("message")
+                or data.get("error_code")
+                or "error"
+            )
+            detail = f"{message} {data.get('details') or ''}"
+            code = (
+                "not_found" if re.search(r"404|not found", detail, re.IGNORECASE) else "tool_failed"
+            )
+            raise MCPConnectError(code, f"{name}: {message}")
+        if "data" not in data:
+            return data
+        data = data["data"]
+    return data
+
+
+async def call(session: Any, name: str, arguments: dict) -> Any:
+    """Call one MCP tool and return its unwrapped payload, or raise typed."""
+    is_error, data, text = tool_payload(await session.call_tool(name, arguments))
+    if is_error:
+        raise tool_error(name, text)
+    return unwrap(name, data)
 
 
 async def list_all_tools(session: Any) -> list:
@@ -404,14 +454,29 @@ async def _probe_work(session: Any) -> dict:
         )
     is_error, data, text = tool_payload(await session.call_tool("health_check", {}))
     if is_error:
-        raise tool_error("health_check", text)
+        raise tool_error("health_check", text, code="health_check_failed")
     if not isinstance(data, dict) or data.get("status") != "success":
         detail = data.get("error_code") or data.get("message") if isinstance(data, dict) else None
         raise MCPConnectError(
             "health_check_failed",
             f"health_check did not report success{f' ({detail})' if detail else ''}",
         )
-    return {"tool_count": len(tools), "health_check": "ok"}
+    # health_check answers without touching project data (the client-api health
+    # route is unauthenticated, and the stateless /mcp only checks that a token
+    # is present), so it cannot tell a valid credential from a wrong one. One
+    # authenticated, read-only, single-item search proves the credential.
+    names = {tool.name for tool in tools}
+    read_tool = next((name for name in _AUTH_READ_TOOLS if name in names), None)
+    if read_tool:
+        result = await session.call_tool(read_tool, {"page_size": 1, "fields": ["_id"]})
+        is_error, data, text = tool_payload(result)
+        if is_error:
+            raise tool_error(read_tool, text)
+        if isinstance(data, dict) and (
+            data.get("status") in ("error", False) or data.get("error_code")
+        ):
+            raise tool_error(read_tool, f"{data.get('message') or ''} {data.get('details') or ''}")
+    return {"tool_count": len(tools), "health_check": "ok", "authenticated_read": read_tool}
 
 
 def probe(base_url: str, auth: tuple[str, str], timeout: float = DEFAULT_TIMEOUT) -> dict:

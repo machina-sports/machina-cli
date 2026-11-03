@@ -29,7 +29,7 @@ def _invoke(base, *args):
 
 def test_tools_walks_every_page_and_never_calls_a_tool():
     calls: list = []
-    server = build_server(tools=25, page_size=4, calls=calls)
+    server = build_server(read=None, tools=25, page_size=4, calls=calls)
     with serve(server.streamable_http_app()) as base:
         result = _invoke(base, "--json")
     assert result.exit_code == 0, result.output
@@ -43,7 +43,7 @@ def test_tools_walks_every_page_and_never_calls_a_tool():
 
 
 def test_tools_compact_entries_carry_only_served_fields():
-    with serve(build_server(tools=1).streamable_http_app()) as base:
+    with serve(build_server(read=None, tools=1).streamable_http_app()) as base:
         result = _invoke(base, "--json")
     extra = next(t for t in json.loads(result.output)["tools"] if t["name"] == "extra_tool_000")
     # No inferred executable/prerequisite flags — only what the server supplies.
@@ -53,7 +53,7 @@ def test_tools_compact_entries_carry_only_served_fields():
 
 
 def test_tools_search_filters_after_full_walk():
-    with serve(build_server(tools=12, page_size=5).streamable_http_app()) as base:
+    with serve(build_server(read=None, tools=12, page_size=5).streamable_http_app()) as base:
         result = _invoke(base, "--json", "--search", "HEALTH")
     payload = json.loads(result.output)
     assert payload["total"] == 13
@@ -61,7 +61,7 @@ def test_tools_search_filters_after_full_walk():
 
 
 def test_tools_describe_matches_served_schema_exactly():
-    server = build_server(tools=3, page_size=2)
+    server = build_server(read=None, tools=3, page_size=2)
     with serve(server.streamable_http_app()) as base:
         result = _invoke(base, "--json", "--describe", "extra_tool_002")
     assert result.exit_code == 0, result.output
@@ -75,14 +75,14 @@ def test_tools_describe_matches_served_schema_exactly():
 
 
 def test_tools_describe_unknown_tool_fails_typed():
-    with serve(build_server().streamable_http_app()) as base:
+    with serve(build_server(read=None).streamable_http_app()) as base:
         result = _invoke(base, "--json", "--describe", "nope")
     assert result.exit_code == 1
     assert json.loads(result.output)["error_code"] == "tool_not_found"
 
 
 def test_tools_over_legacy_sse():
-    with serve(Recorder(build_server(tools=2).sse_app())) as base:
+    with serve(Recorder(build_server(read=None, tools=2).sse_app())) as base:
         result = _invoke(base, "--json")
     payload = json.loads(result.output)
     assert payload["transport"] == "sse"
@@ -90,7 +90,7 @@ def test_tools_over_legacy_sse():
 
 
 def test_tools_auth_denial_is_typed_and_not_downgraded():
-    app_ = Recorder(build_server().sse_app(), deny=401)
+    app_ = Recorder(build_server(read=None).sse_app(), deny=401)
     with serve(app_) as base:
         result = _invoke(base, "--json")
     assert result.exit_code == 1
@@ -99,7 +99,7 @@ def test_tools_auth_denial_is_typed_and_not_downgraded():
 
 
 def test_tools_console_table():
-    with serve(build_server(tools=1).streamable_http_app()) as base:
+    with serve(build_server(read=None, tools=1).streamable_http_app()) as base:
         result = _invoke(base)
     assert result.exit_code == 0, result.output
     assert "extra_tool_000" in result.output

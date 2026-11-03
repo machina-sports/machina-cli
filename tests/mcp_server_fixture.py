@@ -28,6 +28,7 @@ def build_server(
     tools: int = 0,
     page_size: int | None = None,
     calls: list | None = None,
+    read: str | None = "ok",
 ) -> FastMCP:
     server = FastMCP(
         "machina-test",
@@ -49,6 +50,19 @@ def build_server(
         if health == "error":
             return {"status": "error", "error_code": "upstream_error", "message": "down"}
         return {"status": "success", "operation": "health", "message": "ok", "data": {}}
+
+    if read is not None:
+
+        @server.tool(structured_output=True)
+        async def search_agents(
+            page_size: int = 10, fields: list[str] | None = None
+        ) -> dict[str, Any]:
+            """Authenticated project read (the upstream checks the credential)."""
+            if read == "expired":
+                raise ValueError("Upstream API rejected authentication (HTTP 401)")
+            if read == "denied":
+                raise ValueError("Upstream API rejected authentication (HTTP 403)")
+            return {"status": "success", "operation": "search", "data": {"data": []}}
 
     for i in range(tools):
 

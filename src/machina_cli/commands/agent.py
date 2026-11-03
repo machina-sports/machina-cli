@@ -1,14 +1,13 @@
 """Agent management commands."""
 
-import json as json_lib
 import sys
-import time
 
 import typer
 from rich.panel import Panel
 from rich.tree import Tree
 
-from machina_cli.project_client import ProjectClient
+from machina_cli import config_resources, execution_outcome
+from machina_cli.project_client import ProjectAPIError, ProjectClient
 from machina_cli.ui import (
     bool_cell,
     cell,
@@ -168,18 +167,32 @@ def run_agent(
     name: str = typer.Argument(..., help="Agent name"),
     params: list[str] | None = typer.Argument(None, help="Parameters as key=value pairs"),
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
-    sync: bool = typer.Option(False, "--sync", "-s", help="Wait for result (synchronous)"),
-    watch: bool = typer.Option(False, "--watch", "-w", help="Watch execution progress"),
+    sync: bool = typer.Option(
+        False, "--sync", "-s", help="Execute in the request, then report the run's real outcome"
+    ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Submit, then wait (bounded by --timeout) for the real outcome"
+    ),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Same as --wait"),
+    timeout: float = typer.Option(300.0, "--timeout", help="Max seconds for --wait/--sync"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Run an agent with optional parameters.
 
     If no params are provided, shows available inputs and prompts interactively.
 
+    Submit-only (default): schedules the run and exits 0 with outcome "accepted"
+    and the agent_run_id — the run is NOT complete; check it with
+    `machina execution get <id>`. With --wait/--watch (or --sync) the command
+    reports the run's persisted outcome and exits 0 completed, 1 failed,
+    2 partial (some workflows did not complete), 3 timeout/unknown. A submit that
+    times out is reported as unknown and never resubmitted.
+
     Examples:
         machina agent run my-agent
         machina agent run my-agent season_id=sr:season:123
         machina agent run my-agent --sync
+        machina agent run my-agent --wait --timeout 600
         machina agent run my-agent force-competitors=true season_id=sr:season:123 --watch
     """
     client = ProjectClient(project_id)
@@ -252,113 +265,51 @@ def run_agent(
     else:
         body["agent-config"] = {"delay": True}
 
-    console.print()
-    console.print(f"  [bold]Running agent:[/bold] [#FF5C1F]{name}[/#FF5C1F]")
-    if context_agent:
+    if not json_output:  # --json keeps stdout to the one result document
+        console.print()
+        console.print(f"  [bold]Running agent:[/bold] [#FF5C1F]{name}[/#FF5C1F]")
         for k, v in context_agent.items():
             console.print(f"  [dim]{k}=[/dim]{v}")
-    console.print()
+        console.print()
 
-    # Execute
-    if sync:
-        with console.status("  Executing agent (sync)..."):
-            result = client.post(f"agent/executor/{name}", body)
-    else:
-        result = client.post(f"agent/executor/{name}", body)
+    # Execute. Submit-only (default) returns an accepted run id; --sync and
+    # --wait report the run record's real outcome and exit by it.
+    path = f"agent/executor/{name}"
+    try:
+        if sync:
+            with console.status("  Executing agent (sync)..."):
+                result = execution_outcome.submit(client, path, body, timeout=timeout + 30)
+        else:
+            result = execution_outcome.submit(client, path, body)
+    except execution_outcome.SubmissionUncertain:
+        execution_outcome.uncertain("agent", json_output)
 
     data = result.get("data", result)
+    data = data if isinstance(data, dict) else {"result": data}
+    agent_run_id = data.get("agent_run_id") or data.get("runner_id") or ""
+    if not agent_run_id:
+        execution_outcome.uncertain("agent", json_output)
 
-    if json_output:
-        console.print_json(json_lib.dumps(data, default=str))
-        return
+    run = None
+    try:
+        if sync:
+            # The sync response never proved success: read the persisted run.
+            run = execution_outcome.get_agent_run(client, agent_run_id)
+            outcome = execution_outcome.agent_outcome(run)
+            mode = "sync"
+        elif wait or watch:
+            with console.status("  Waiting for the run to finish..."):
+                outcome, run = execution_outcome.wait_for("agent", client, agent_run_id, timeout)
+            mode = "wait"
+        else:
+            outcome, mode = data.get("outcome") or "accepted", "submit"
+    except (execution_outcome.PollFailed, ProjectAPIError) as exc:
+        # The run was submitted; only reading its status failed: unknown (3).
+        execution_outcome.poll_failed("agent", agent_run_id, exc, json_output)
 
-    agent_run_id = data.get("agent_run_id", "")
-    task_id = data.get("task_id", "")
-
-    if sync:
-        # Sync mode — show result directly
-        response = data.get("response", {})
-        status = "completed"
-        console.print(
-            Panel(
-                f"[bold]Status:[/bold] [green]{status}[/green]\n"
-                f"[bold]Agent Run ID:[/bold] {agent_run_id}",
-                title="Execution Complete",
-                border_style="#FF5C1F",
-            )
-        )
-        if response:
-            formatted = json_lib.dumps(response, indent=2, default=str, ensure_ascii=False)
-            from rich.syntax import Syntax
-
-            console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Response"))
-    else:
-        # Async mode — show run ID
-        console.print(
-            Panel(
-                f"[bold]Agent Run ID:[/bold] {agent_run_id}\n"
-                f"[bold]Task ID:[/bold] {task_id}\n"
-                f"[bold]Status:[/bold] [yellow]scheduled[/yellow]",
-                title="Agent Scheduled",
-                border_style="#FF5C1F",
-            )
-        )
-        console.print(f"  [dim]Track with:[/dim] [bold]machina execution get {agent_run_id}[/bold]")
-
-    # Watch mode — poll for completion
-    if watch and agent_run_id and not sync:
-        console.print()
-        elapsed = 0
-        with console.status("  Watching execution..."):
-            while elapsed < 300:
-                time.sleep(3)
-                elapsed += 3
-                try:
-                    run_result = client.get(f"execution/agent-run/{agent_run_id}?compact=true")
-                    run_data = run_result.get("data", {})
-                    run_status = run_data.get("status", "")
-
-                    if run_status in ("agent-executed", "completed", "failed"):
-                        console.print()
-                        exec_time = run_data.get("execution_time")
-                        time_str = (
-                            f"{exec_time:.1f}s" if isinstance(exec_time, (int, float)) else "N/A"
-                        )
-                        color = (
-                            "green"
-                            if "executed" in run_status or "completed" in run_status
-                            else "red"
-                        )
-
-                        console.print(
-                            Panel(
-                                f"[bold]Status:[/bold] [{color}]{run_status}[/{color}]\n"
-                                f"[bold]Time:[/bold] {time_str}\n"
-                                f"[bold]Workflows:[/bold] {run_data.get('completed_workflows', 0)}/{run_data.get('total_workflows', 0)}",
-                                title="Execution Complete",
-                                border_style="#FF5C1F",
-                            )
-                        )
-
-                        response = run_data.get("response", {})
-                        if response:
-                            formatted = json_lib.dumps(
-                                response, indent=2, default=str, ensure_ascii=False
-                            )
-                            from rich.syntax import Syntax
-
-                            console.print(
-                                Panel(Syntax(formatted, "json", theme="monokai"), title="Response")
-                            )
-                        break
-                except Exception:
-                    pass
-
-            if elapsed >= 300:
-                console.print("  [yellow]Timed out watching. Agent may still be running.[/yellow]")
-                console.print(
-                    f"  [dim]Check with:[/dim] [bold]machina execution get {agent_run_id}[/bold]"
-                )
+    code = execution_outcome.report("agent", mode, outcome, agent_run_id, data, run, json_output)
+    if code:
+        raise typer.Exit(code)
 
 
 @app.command("executions")
@@ -419,3 +370,42 @@ def list_executions(
     render_pagination(
         result, page=page, page_size=page_size, count=len(executions), noun="executions"
     )
+
+
+# --- configuration CRUD (see config_resources.py) ----------------------------
+
+
+@app.command("create")
+def create_agent(
+    file: str = typer.Option(..., "--file", "-f", help="JSON file with the agent definition"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a agent from a JSON file and print the persisted record."""
+    config_resources.create("agent", file, project_id, json_output)
+
+
+@app.command("update")
+def update_agent(
+    ref: str = typer.Argument(..., help="Agent name or id"),
+    file: str = typer.Option(..., "--file", "-f", help="JSON file with the fields to change"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update a agent's configuration; omitted fields are kept.
+
+    Never changes status/scheduling: a file that would change status, scheduled,
+    processing or last_execution is refused (activation is a separate operation).
+    """
+    config_resources.update("agent", ref, file, project_id, json_output)
+
+
+@app.command("delete")
+def delete_agent(
+    ref: str = typer.Argument(..., help="Agent name or id"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Delete a agent (asks for confirmation unless --yes)."""
+    config_resources.delete("agent", ref, project_id, json_output, yes)

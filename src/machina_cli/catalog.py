@@ -42,8 +42,14 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[CommandSpec, ...]], ...] = (
     (
         "Resources",
         (
-            CommandSpec("workflow", ("list", "get", "run"), "Workflows"),
-            CommandSpec("agent", ("list", "get", "run", "executions"), "Agents"),
+            CommandSpec(
+                "workflow", ("list", "get", "run", "create", "update", "delete"), "Workflows"
+            ),
+            CommandSpec(
+                "agent",
+                ("list", "get", "run", "executions", "create", "update", "delete"),
+                "Agents",
+            ),
             CommandSpec("connector", ("list", "get"), "Connectors"),
             CommandSpec("mapping", ("list", "get"), "Mappings"),
             CommandSpec("prompt", ("list", "get"), "Prompts"),
@@ -57,7 +63,17 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[CommandSpec, ...]], ...] = (
             CommandSpec("approvals", ("list", "approve", "reject"), "Human approval checkpoints"),
             CommandSpec(
                 "skills",
-                ("list", "install", "info", "run", "push", "constructor"),
+                (
+                    "list",
+                    "install",
+                    "info",
+                    "run",
+                    "push",
+                    "constructor",
+                    "show",
+                    "docs",
+                    "result",
+                ),
                 "Skills-first surface",
             ),
             CommandSpec(
