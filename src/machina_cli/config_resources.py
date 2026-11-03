@@ -95,6 +95,58 @@ def update_body(kind: str, current: dict, body: dict) -> dict:
     return payload
 
 
+def agent_references(body: dict) -> list[dict]:
+    """Workflows/skills an agent definition calls by name, in order, deduplicated."""
+    refs, seen = [], set()
+    for step in body.get("workflows") or []:
+        if not isinstance(step, dict) or not isinstance(step.get("name"), str) or not step["name"]:
+            continue
+        ref = ("skill" if step.get("type") == "skill" else "workflow", step["name"])
+        if ref not in seen:
+            seen.add(ref)
+            refs.append({"type": ref[0], "name": ref[1]})
+    return refs
+
+
+def _exists(client: ProjectClient, kind: str, name: str) -> bool:
+    """Quiet existence check (no stderr noise for an expected miss)."""
+    import httpx
+
+    with httpx.Client(timeout=30) as http:
+        response = http.get(
+            f"{client.api_url}/{kind}/{name}",
+            params={"fields": "_id,name"},
+            headers=client._headers(),
+        )
+    if response.status_code in (401, 403):
+        raise ProjectAPIError("not authorized to read references", response.status_code)
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    data = body.get("data") if isinstance(body, dict) else None
+    return response.status_code == 200 and isinstance(data, dict) and bool(data.get("_id"))
+
+
+def check_references(client: ProjectClient, kind: str, body: dict) -> None:
+    """Refuse an agent whose workflows[] call names that don't exist in the project.
+
+    The REST API stores agents as given (Studio and template installs rely on
+    that), so the CLI checks before writing, like the MCP adapter does.
+    """
+    if kind != "agent" or "workflows" not in body:
+        return
+    missing = [
+        ref for ref in agent_references(body) if not _exists(client, ref["type"], ref["name"])
+    ]
+    if missing:
+        names = ", ".join(f"{ref['type']} '{ref['name']}'" for ref in missing)
+        raise ConfigError(
+            "invalid_reference",
+            f"the agent calls {names}, which do not exist in this project; create them first",
+        )
+
+
 def _emit(json_output: bool, kind: str, operation: str, record: dict | None, ref_id: str):
     if json_output:
         print(
@@ -139,6 +191,7 @@ def create(kind: str, file: str, project_id: str | None, json_output: bool):
         if not body.get("name"):
             raise ConfigError("invalid_file", f"a {kind} needs a 'name'")
         client = ProjectClient(project_id)
+        check_references(client, kind, body)
         result = client.post(kind, body)
         new_id = (result.get("data") or {}).get("id")
         if not new_id:
@@ -157,7 +210,9 @@ def update(kind: str, ref: str, file: str, project_id: str | None, json_output: 
         body = load_file(file)
         client = ProjectClient(project_id)
         current = read(client, kind, ref)
-        client.put(f"{kind}/{current['_id']}", update_body(kind, current, body))
+        payload = update_body(kind, current, body)
+        check_references(client, kind, payload)
+        client.put(f"{kind}/{current['_id']}", payload)
         _emit(json_output, kind, "updated", read(client, kind, current["_id"]), current["_id"])
 
     _guard(json_output, action)

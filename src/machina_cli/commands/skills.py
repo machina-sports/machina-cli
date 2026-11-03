@@ -348,12 +348,11 @@ def _skill_view(skill: dict) -> dict:
 
 
 def _remote(project_id, json_output, timeout, work):
-    from machina_cli.commands.mcp import fail, resolve_base_url
-    from machina_cli.config import resolve_auth_token
+    from machina_cli.commands.mcp import fail, mcp_auth, resolve_base_url
 
     project_id, base_url = resolve_base_url(project_id, json_output)
     try:
-        _, result = mcp_session.run(base_url, resolve_auth_token(), work, timeout)
+        _, result = mcp_session.run(base_url, mcp_auth(project_id), work, timeout)
     except mcp_session.MCPConnectError as error:
         fail(error, json_output)
     return project_id, result
@@ -515,12 +514,11 @@ def _run_remote(skill, params, message, project_id, json_output, timeout):
         run_id = run_id or (inner.get("skill_run_id") if isinstance(inner, dict) else None)
         return record, run_id, inner
 
-    from machina_cli.commands.mcp import fail, resolve_base_url
-    from machina_cli.config import resolve_auth_token
+    from machina_cli.commands.mcp import fail, mcp_auth, resolve_base_url
 
     project_id, base_url = resolve_base_url(project_id, json_output)
     try:
-        _, (record, run_id, inner) = mcp_session.run(base_url, resolve_auth_token(), work, timeout)
+        _, (record, run_id, inner) = mcp_session.run(base_url, mcp_auth(project_id), work, timeout)
     except mcp_session.MCPConnectError as error:
         if state["submitted"] and error.code == "endpoint_unavailable":
             # The request may have reached the server: never resubmit blindly.
