@@ -7,6 +7,7 @@ import time
 import typer
 from rich.panel import Panel
 
+from machina_cli import config_resources
 from machina_cli.project_client import ProjectClient
 from machina_cli.ui import (
     cell,
@@ -298,3 +299,42 @@ def run_workflow(
                 console.print(
                     f"  [dim]Check with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]"
                 )
+
+
+# --- configuration CRUD (see config_resources.py) ----------------------------
+
+
+@app.command("create")
+def create_workflow(
+    file: str = typer.Option(..., "--file", "-f", help="JSON file with the workflow definition"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a workflow from a JSON file and print the persisted record."""
+    config_resources.create("workflow", file, project_id, json_output)
+
+
+@app.command("update")
+def update_workflow(
+    ref: str = typer.Argument(..., help="Workflow name or id"),
+    file: str = typer.Option(..., "--file", "-f", help="JSON file with the fields to change"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update a workflow's configuration; omitted fields are kept.
+
+    Never changes status/scheduling: a file that would change status, scheduled,
+    processing or last_execution is refused (activation is a separate operation).
+    """
+    config_resources.update("workflow", ref, file, project_id, json_output)
+
+
+@app.command("delete")
+def delete_workflow(
+    ref: str = typer.Argument(..., help="Workflow name or id"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Delete a workflow (asks for confirmation unless --yes)."""
+    config_resources.delete("workflow", ref, project_id, json_output, yes)

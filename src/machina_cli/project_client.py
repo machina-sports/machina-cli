@@ -137,6 +137,49 @@ def _get_project_session(project_id: str) -> dict:
     return cached
 
 
+_STATUS_MESSAGES = {403: "Permission denied.", 404: "Resource not found."}
+_ERROR_CODES = {
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    409: "conflict",
+    400: "invalid_request",
+    422: "invalid_request",
+}
+
+
+def _body_failed(status) -> bool:
+    if status in ("error", False):
+        return True
+    return isinstance(status, int) and not isinstance(status, bool) and status >= 400
+
+
+class ProjectAPIError(SystemExit):
+    """A rejected Client API request.
+
+    Subclasses SystemExit(1) so every existing caller keeps exiting non-zero;
+    commands that emit machine output catch it and print `to_payload()`.
+    """
+
+    def __init__(self, message: str, http_status: int, details=None):
+        super().__init__(1)
+        self.message = message
+        self.http_status = http_status
+        self.details = details
+        if http_status >= 500:
+            self.code = "server_error"
+        elif http_status >= 400:
+            self.code = _ERROR_CODES.get(http_status, "request_rejected")
+        else:
+            self.code = "rejected"  # HTTP 2xx with status false in the body
+
+    def to_payload(self) -> dict:
+        payload = {"error": self.message, "error_code": self.code, "http_status": self.http_status}
+        if self.details:
+            payload["details"] = self.details
+        return payload
+
+
 class ProjectClient:
     """HTTP client for per-project Client API resources."""
 
@@ -179,14 +222,22 @@ class ProjectClient:
             pass
 
         error_msg = ""
+        details = None
         if isinstance(data, dict):
             error = data.get("error", {})
             if isinstance(error, dict):
                 error_msg = error.get("message", "")
+                details = error or None
             elif isinstance(error, str):
                 error_msg = error
+            elif isinstance(error, list):
+                details = error
+            error_msg = error_msg or (
+                data.get("message", "") if _body_failed(data.get("status")) else ""
+            )
 
-        if response.status_code == 401:
+        status = response.status_code
+        if status == 401:
             # Clear cached and stored project token
             _project_cache.pop(_cache_key(self.project_id), None)
             _clear_credential(f"project_token_{self.project_id}")
@@ -194,20 +245,20 @@ class ProjectClient:
             console.print(
                 "[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]"
             )
-            raise SystemExit(1)
-        if response.status_code == 403:
-            console.print(f"[red]{error_msg or 'Permission denied.'}[/red]")
-            raise SystemExit(1)
-        if response.status_code == 404:
-            console.print(f"[red]{error_msg or 'Resource not found.'}[/red]")
-            raise SystemExit(1)
-        if response.status_code >= 500:
-            console.print(f"[red]{error_msg or 'Client API error.'}[/red]")
-            raise SystemExit(1)
+            raise ProjectAPIError(error_msg or "project session expired", status, details)
+        if status >= 400:
+            fallback = _STATUS_MESSAGES.get(status) or (
+                "Client API error." if status >= 500 else f"Request rejected (HTTP {status})."
+            )
+            console.print(f"[red]{error_msg or fallback}[/red]")
+            raise ProjectAPIError(error_msg or fallback.rstrip("."), status, details)
 
-        if isinstance(data, dict) and data.get("status") == "error":
+        # A 200 whose body says it failed is a failure: the legacy controllers
+        # return {"status": false, "error": {...}} with HTTP 200 (and the agent
+        # executor's not-found is {"status": 404, "message": ...}).
+        if isinstance(data, dict) and _body_failed(data.get("status")):
             console.print(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
-            raise SystemExit(1)
+            raise ProjectAPIError(error_msg or "request failed", status, details)
 
         return data
 
@@ -226,6 +277,26 @@ class ProjectClient:
         try:
             with httpx.Client(timeout=TIMEOUT) as client:
                 response = client.post(url, headers=self._headers(), json=json_data or {})
+                return self._handle_response(response)
+        except httpx.ConnectError:
+            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            raise SystemExit(1)
+
+    def put(self, path: str, json_data: dict | None = None) -> dict:
+        url = f"{self.api_url}/{path.lstrip('/')}"
+        try:
+            with httpx.Client(timeout=TIMEOUT) as client:
+                response = client.put(url, headers=self._headers(), json=json_data or {})
+                return self._handle_response(response)
+        except httpx.ConnectError:
+            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            raise SystemExit(1)
+
+    def delete(self, path: str) -> dict:
+        url = f"{self.api_url}/{path.lstrip('/')}"
+        try:
+            with httpx.Client(timeout=TIMEOUT) as client:
+                response = client.delete(url, headers=self._headers())
                 return self._handle_response(response)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
