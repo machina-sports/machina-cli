@@ -2,6 +2,21 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.10.0] - 2026-11-03
+
+Agent-first DX (epic 17tpepctxnh): the CLI now drives a project end to end without Studio detours.
+
+### Added
+- **`machina mcp url --probe` / `machina connect --probe` verify readiness for real (DX-01).** Streamable HTTP at `/mcp` first, legacy SSE at `/mcp/sse` only when the deployment answers 404/405 — never after a 401/403. Readiness means MCP handshake → `tools/list` (all pages) → `health_check` → one authenticated, read-only project search, so a wrong credential fails instead of looking ready. Typed errors (`missing_credentials`, `expired_credentials`, `wrong_project`, `access_denied`, `endpoint_unavailable`, `incompatible_protocol`, `health_check_failed`) and a versioned JSON schema (`machina.mcp.connection/v1`); tokens are never printed.
+- **`machina mcp tools [--search] [--describe] --json` (DX-01):** read-only capability discovery over the full cursor-paginated catalog, names and input schemas exactly as served.
+- **Installed project Skills via the pod (DX-03):** `machina skills show|docs|result` and `skills run --remote`. `skills list`/`info` no longer download the constructor skill as a side effect.
+- **`machina agent|workflow create|update|delete --file` (DX-02)** with a strict error contract: `status: false` or a numeric error status in an HTTP 200 body, and any 4xx/5xx, exit non-zero with a structured error.
+- **Truthful execution outcomes (DX-04):** `--wait/--timeout` long-poll the run; exit codes `0` completed, `1` failed, `2` partial, `3` timeout/unknown. A request timeout reports that the submission may have run and how to reconcile (`machina execution get <id>`) — never auto-resubmits. `execution get --workflow` reads workflow runs.
+
+### Fixed
+- `machina project use` clears a `client_api_url` configured for the previous project, so requests (and the API key) are never sent to the old project's host.
+- Direct API-key mode no longer serves a different selected project from the configured URL; the in-memory session cache is keyed on (project, endpoint).
+
 ## [0.9.0] - 2026-09-10
 
 ### Added
