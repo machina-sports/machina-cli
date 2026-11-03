@@ -236,20 +236,20 @@ class ProjectClient:
 
         return data
 
-    def get(self, path: str, params: dict | None = None) -> dict:
+    def get(self, path: str, params: dict | None = None, timeout: float | None = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
         try:
-            with httpx.Client(timeout=TIMEOUT) as client:
+            with httpx.Client(timeout=timeout or TIMEOUT) as client:
                 response = client.get(url, headers=self._headers(), params=params)
                 return self._handle_response(response)
         except httpx.ConnectError:
             console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
             raise SystemExit(1)
 
-    def post(self, path: str, json_data: dict | None = None) -> dict:
+    def post(self, path: str, json_data: dict | None = None, timeout: float | None = None) -> dict:
         url = f"{self.api_url}/{path.lstrip('/')}"
         try:
-            with httpx.Client(timeout=TIMEOUT) as client:
+            with httpx.Client(timeout=timeout or TIMEOUT) as client:
                 response = client.post(url, headers=self._headers(), json=json_data or {})
                 return self._handle_response(response)
         except httpx.ConnectError:

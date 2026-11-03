@@ -2,13 +2,12 @@
 
 import json as json_lib
 import sys
-import time
 
 import typer
 from rich.panel import Panel
 
-from machina_cli import config_resources
-from machina_cli.project_client import ProjectClient
+from machina_cli import config_resources, execution_outcome
+from machina_cli.project_client import ProjectAPIError, ProjectClient
 from machina_cli.ui import (
     cell,
     console,
@@ -113,12 +112,23 @@ def run_workflow(
     sync: bool = typer.Option(
         True, "--sync/--async", "-s/-a", help="Sync (wait) or async (schedule)"
     ),
-    watch: bool = typer.Option(False, "--watch", "-w", help="Watch async execution progress"),
+    wait: bool = typer.Option(
+        False, "--wait", help="With --async: wait (bounded by --timeout) for the real outcome"
+    ),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Same as --wait"),
+    timeout: float = typer.Option(300.0, "--timeout", help="Max seconds for sync/--wait"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Run a workflow with optional parameters.
 
     If no params are provided, shows available inputs and prompts interactively.
+
+    Sync (default) executes in the request, then reads the persisted run: exit 0
+    completed, 1 failed, 3 unknown. --async is submit-only: exit 0 with outcome
+    "accepted" and a workflow_run_id — NOT complete; check it with
+    `machina execution get --workflow <id>`. --async --wait/--watch waits for the
+    real outcome (3 on timeout). A submit that times out is reported as unknown
+    and never resubmitted.
 
     Examples:
         machina workflow run my-workflow
@@ -191,56 +201,71 @@ def run_workflow(
     if context:
         body["context-workflow"] = context
 
-    console.print()
-    console.print(f"  [bold]Running workflow:[/bold] [#FF5C1F]{name}[/#FF5C1F]")
-    if context:
+    if not json_output:  # --json keeps stdout to the one result document
+        console.print()
+        console.print(f"  [bold]Running workflow:[/bold] [#FF5C1F]{name}[/#FF5C1F]")
         for k, v in context.items():
             console.print(f"  [dim]{k}=[/dim]{v}")
-    mode = "sync" if sync else "async"
-    console.print(f"  [dim]Mode:[/dim] {mode}")
-    console.print()
+        console.print(f"  [dim]Mode:[/dim] {'sync' if sync else 'async'}")
+        console.print()
 
-    # Choose endpoint based on mode
-    if sync:
-        endpoint = f"workflow/execute/{name}"
-        with console.status("  Executing workflow..."):
-            result = client.post(endpoint, body)
-    else:
-        endpoint = f"workflow/schedule/{name}"
-        result = client.post(endpoint, body)
+    # Execute. --async without --wait is submit-only (exit 0, outcome
+    # "accepted"); sync and --wait report the persisted run's real outcome.
+    try:
+        if sync:
+            with console.status("  Executing workflow..."):
+                result = execution_outcome.submit(
+                    client, f"workflow/execute/{name}", body, timeout=timeout + 30
+                )
+        else:
+            result = execution_outcome.submit(client, f"workflow/schedule/{name}", body)
+    except execution_outcome.SubmissionUncertain:
+        execution_outcome.uncertain("workflow", json_output)
 
     data = result.get("data", result)
-
-    if json_output:
-        console.print_json(json_lib.dumps(data, default=str))
-        return
-
+    data = data if isinstance(data, dict) else {"result": data}
     workflow_run_id = data.get("workflow_run_id", data.get("_id", ""))
-    status = data.get("status", "scheduled" if not sync else "executed")
-    color = (
-        "green"
-        if status in ("executed", "completed")
-        else "yellow"
-        if status == "scheduled"
-        else "red"
-    )
+    if not workflow_run_id:
+        execution_outcome.uncertain("workflow", json_output)
 
-    console.print(
-        Panel(
-            f"[bold]Status:[/bold] [{color}]{status}[/{color}]\n"
-            f"[bold]Workflow Run ID:[/bold] {workflow_run_id}",
-            title="Workflow " + ("Complete" if sync else "Scheduled"),
-            border_style="#FF5C1F",
-        )
-    )
+    run = None
+    try:
+        if sync:
+            # The execute response says "scheduled"/success even when the run
+            # failed: the persisted run record is the truth.
+            run = execution_outcome.get_workflow_run(client, workflow_run_id)
+            outcome = execution_outcome.workflow_outcome(run)
+            mode = "sync"
+        elif wait or watch:
+            with console.status("  Waiting for the run to finish..."):
+                outcome, run = execution_outcome.wait_for(
+                    "workflow", client, workflow_run_id, timeout
+                )
+            mode = "wait"
+        else:
+            outcome, mode = data.get("outcome") or "accepted", "submit"
+    except (execution_outcome.PollFailed, ProjectAPIError) as exc:
+        # The run was submitted; only reading its status failed: unknown (3).
+        execution_outcome.poll_failed("workflow", workflow_run_id, exc, json_output)
 
-    # Show response for sync execution
-    if sync:
-        # Filter out internal fields, show the workflow output
+    code = execution_outcome.report(
+        "workflow", mode, outcome, workflow_run_id, data, run, json_output
+    )
+    if not json_output and outcome in ("completed", "partial"):
         output = {
             k: v
-            for k, v in data.items()
-            if k not in ("workflow_run_id", "_id", "status", "message")
+            for k, v in (run or data).items()
+            if k
+            not in (
+                "workflow_run_id",
+                "_id",
+                "status",
+                "message",
+                "outcome",
+                "request_data",
+                "workflow_object",
+                "audit",
+            )
         }
         if output:
             formatted = json_lib.dumps(output, indent=2, default=str, ensure_ascii=False)
@@ -249,56 +274,8 @@ def run_workflow(
             from rich.syntax import Syntax
 
             console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Output"))
-
-    # Async: show tracking hint
-    if not sync and workflow_run_id:
-        console.print(
-            f"  [dim]Track with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]"
-        )
-
-    # Watch mode for async
-    if watch and not sync and workflow_run_id:
-        console.print()
-        elapsed = 0
-        with console.status("  Watching execution..."):
-            while elapsed < 300:
-                time.sleep(3)
-                elapsed += 3
-                try:
-                    run_result = client.get(f"workflow/schedule/{workflow_run_id}")
-                    run_data = run_result.get("data", {})
-                    run_status = run_data.get("status", "")
-
-                    if run_status in ("executed", "completed", "failed"):
-                        console.print()
-                        run_color = "green" if run_status in ("executed", "completed") else "red"
-                        console.print(
-                            Panel(
-                                f"[bold]Status:[/bold] [{run_color}]{run_status}[/{run_color}]",
-                                title="Execution Complete",
-                                border_style="#FF5C1F",
-                            )
-                        )
-
-                        output = run_data.get("workflow_output", {})
-                        if output:
-                            formatted = json_lib.dumps(
-                                output, indent=2, default=str, ensure_ascii=False
-                            )
-                            from rich.syntax import Syntax
-
-                            console.print(
-                                Panel(Syntax(formatted, "json", theme="monokai"), title="Output")
-                            )
-                        break
-                except Exception:
-                    pass
-
-            if elapsed >= 300:
-                console.print("  [yellow]Timed out. Workflow may still be running.[/yellow]")
-                console.print(
-                    f"  [dim]Check with:[/dim] [bold]machina execution get {workflow_run_id}[/bold]"
-                )
+    if code:
+        raise typer.Exit(code)
 
 
 # --- configuration CRUD (see config_resources.py) ----------------------------
