@@ -9,16 +9,16 @@ URL. The token is masked by default; pass --reveal (or --json --reveal) to emit 
 import json
 import re
 
-import typer
 from rich.console import Console
 
-# Single source of truth for the MCP connection contract (verified against
-# machina-core-api + machina-client-api — see mcp.py).
+# Single source of truth for the MCP connection contract and its JSON schema
+# (see mcp.py / mcp_session.py).
+from machina_cli import mcp_session
 from machina_cli.client import MachinaClient
 from machina_cli.commands.credentials import _mask_key
-from machina_cli.commands.mcp import _MCP_PATH, _MCP_TRANSPORT, _probe
+from machina_cli.commands.mcp import connection_payload, probe_or_fail, resolve_base_url
 from machina_cli.config import get_config, resolve_auth_token
-from machina_cli.project_client import ProjectClient
+from machina_cli.mcp_session import MCPConnectError
 
 console = Console()
 
@@ -32,13 +32,11 @@ def _safe_name(value: str) -> str:
     return cleaned or "machina"
 
 
-def _fail(message: str, json_output: bool, extra: dict | None = None):
-    """Emit an error (JSON envelope or console) and exit non-zero."""
-    if json_output:
-        print(json.dumps({"error": message, **(extra or {})}))
-    else:
-        console.print(f"[red]{message}.[/red]")
-    raise typer.Exit(1)
+def _fail(message: str, json_output: bool, code: str = "credential_mint_failed"):
+    """Emit a typed error (shared schema-v1 envelope) and exit non-zero."""
+    from machina_cli.commands.mcp import fail
+
+    fail(MCPConnectError(code, message), json_output)
 
 
 def _ensure_project_api_key(project_id: str, org_id: str, json_output: bool) -> str:
@@ -89,34 +87,23 @@ def run(
     name: str | None,
     mint: bool = False,
     org: str | None = None,
+    timeout: float = mcp_session.DEFAULT_TIMEOUT,
 ):
     """Resolve and present a project's MCP connection bundle."""
     project_id = project_id or get_config("default_project_id")
     if not project_id:
-        _fail("no project specified", json_output)
+        _fail("no project specified", json_output, "wrong_project")
 
     header_name, token = resolve_auth_token()
     if not token:
-        _fail("not authenticated", json_output)
+        _fail("not authenticated", json_output, "missing_credentials")
 
-    try:
-        client = ProjectClient(project_id)
-    except SystemExit:
-        # ProjectClient raises SystemExit on auth/lookup failure (detail on stderr).
-        if json_output:
-            print(json.dumps({"error": "could not resolve project session"}))
-            raise typer.Exit(1) from None
-        raise
-
-    if not client.api_url:
-        _fail("project has no client-api address", json_output)
-
-    mcp_url = f"{client.api_url}{_MCP_PATH}"
+    project_id, base_url = resolve_base_url(project_id, json_output)
     server_name = name or _safe_name(project_id)
 
     # --mint: ensure a durable, dedicated project API key (X-Api-Token) instead of
     # handing off whatever ambient credential the user happens to have. Done before
-    # the probe so reachability is checked with the credential actually emitted.
+    # the probe so readiness is checked with the credential actually emitted.
     if mint:
         org_id = org or get_config("default_organization_id")
         if not org_id:
@@ -127,44 +114,44 @@ def run(
         try:
             minted = _ensure_project_api_key(project_id, org_id, json_output)
         except SystemExit:
-            if json_output:
-                print(json.dumps({"error": "could not mint api key"}))
-                raise typer.Exit(1) from None
-            raise
+            _fail("could not mint api key", json_output)
         if not minted:
             _fail("api key minting returned no key", json_output)
         header_name, token = "X-Api-Token", minted
 
-    if probe and not _probe(mcp_url, (header_name, token)):
-        _fail("endpoint not reachable", json_output, {"url": mcp_url})
+    probed = None
+    if probe:
+        probed = probe_or_fail(base_url, (header_name, token), json_output, timeout)
 
     durable = header_name == "X-Api-Token"
 
+    payload = connection_payload(project_id, base_url, header_name, probed)
     if json_output:
-        print(
-            json.dumps(
-                {
-                    "name": server_name,
-                    "url": mcp_url,
-                    "transport": _MCP_TRANSPORT,
-                    "auth_header": header_name,
-                    # null (not the masked preview) unless --reveal, so a script can
-                    # never mistake a redacted string for a usable credential.
-                    "token": token if reveal else None,
-                    "masked": not reveal,
-                    "durable": durable,
-                }
-            )
+        payload.update(
+            {
+                "name": server_name,
+                # null (not the masked preview) unless --reveal, so a script can
+                # never mistake a redacted string for a usable credential.
+                "token": token if reveal else None,
+                "masked": not reveal,
+                "durable": durable,
+            }
         )
+        print(json.dumps(payload))
         return
 
     shown = token if reveal else _mask_key(token)
     hint = "" if reveal else "  [dim](masked — use --reveal)[/dim]"
     console.print(f"[bold]Name:[/bold]        {server_name}")
-    console.print(f"[bold]MCP URL:[/bold]     {mcp_url}")
-    console.print(f"[bold]Transport:[/bold]   {_MCP_TRANSPORT}")
+    console.print(f"[bold]MCP URL:[/bold]     {payload['url']}")
+    console.print(f"[bold]Transport:[/bold]   {payload['transport']}")
     console.print(f"[bold]Auth header:[/bold] {header_name}")
     console.print(f"[bold]Token:[/bold]       {shown}{hint}")
+    if probed:
+        console.print(
+            f"[bold]Protocol:[/bold]    {probed['protocol_version']}  [green]ready "
+            f"({probed['tool_count']} tools, health_check ok)[/green]"
+        )
 
     # sportsclaw injects --token as X-Api-Token; a session token may expire and
     # may not validate there. Nudge toward a durable project API key.
@@ -177,7 +164,7 @@ def run(
 
     console.print("\n[dim]Register with sportsclaw:[/dim]")
     console.print(
-        f"  [bold]sportsclaw mcp add[/bold] {mcp_url} --name {server_name} --token <token>"
+        f"  [bold]sportsclaw mcp add[/bold] {payload['url']} --name {server_name} --token <token>"
     )
     console.print(
         "[dim]Get the token with[/dim] machina connect --reveal[dim], or[/dim] --json --reveal[dim] for a script.[/dim]"

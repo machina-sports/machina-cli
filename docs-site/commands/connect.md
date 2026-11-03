@@ -5,14 +5,14 @@
 ## Usage
 
 ```text
-machina connect [project_id] [--reveal] [--probe] [--name <n>] [--mint [--org <id>]] [--json]
+machina connect [project_id] [--reveal] [--probe [--timeout <s>]] [--name <n>] [--mint [--org <id>]] [--json]
 ```
 
 | Arg / flag | Purpose |
 |------------|---------|
 | `project_id` | Project to connect (defaults to the selected project). |
 | `--reveal` | Show the auth token (**masked by default**). |
-| `--probe` | Verify the SSE endpoint is reachable before handing it out. |
+| `--probe` | Verify readiness with the exact credential being handed out (MCP handshake, `tools/list`, `health_check`) and report the negotiated transport. |
 | `--name`, `-n` | Server name for the agent (defaults to the project id; coerced to `^[A-Za-z0-9_-]+$`). |
 | `--mint` | Reuse or **create a dedicated `sportsclaw-<project>` project API key** for a durable connection. |
 | `--org`, `-o` | Organization ID for `--mint` (defaults to the selected org). |
@@ -33,7 +33,7 @@ machina connect <project-id> --mint --reveal --json
 
 ## What you get
 
-- The **MCP URL**, **transport** (`sse`), and **auth header** (`X-Api-Token`) — the same derivation as [`machina mcp url`](/commands/mcp).
+- The **MCP URL**, **transport**, and **auth header** — the same resolution and JSON schema (`machina.mcp.connection/v1`, plus `name`/`token`/`masked`/`durable`) as [`machina mcp url`](/commands/mcp). Unprobed it is the legacy SSE endpoint marked `"verified": false`; with `--probe` it is the transport the handshake succeeded on (streamable HTTP first).
 - A **token** paired to that endpoint. By default the ambient session/API-key credential; with `--mint`, a durable dedicated **`sportsclaw-<project>`** project API key (reused if it already exists, minted if not — so the connection survives your session expiring).
 
 ::: warning Token handling
