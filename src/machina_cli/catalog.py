@@ -57,7 +57,17 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[CommandSpec, ...]], ...] = (
             CommandSpec("approvals", ("list", "approve", "reject"), "Human approval checkpoints"),
             CommandSpec(
                 "skills",
-                ("list", "install", "info", "run", "push", "constructor"),
+                (
+                    "list",
+                    "install",
+                    "info",
+                    "run",
+                    "push",
+                    "constructor",
+                    "show",
+                    "docs",
+                    "result",
+                ),
                 "Skills-first surface",
             ),
             CommandSpec(

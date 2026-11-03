@@ -5,7 +5,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
+from machina_cli import mcp_session
 from machina_cli.commands import agent as agent_cmd
 from machina_cli.commands import template
 from machina_cli.commands import workflow as workflow_cmd
@@ -80,8 +82,7 @@ def list_skills(
     private: bool = typer.Option(False, "--private", help="Private repository"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """List available skills from the template repository."""
-    _ensure_constructor_installed(repo=repo, branch=branch)
+    """List available skills from the template repository (read-only: installs nothing)."""
     return template.list_templates(
         project_id=project_id,
         repo=repo,
@@ -156,8 +157,7 @@ def skill_info(
         ..., help="Path to the skill/template (e.g. skills/mkn-constructor)"
     ),
 ):
-    """Show skill metadata and manifest location when available."""
-    _ensure_constructor_installed()
+    """Show a local skill's manifest (skill.yml). For an installed project Skill use `skills show`."""
     manifest_path, skill = _load_skill_manifest(Path(skill_path).name)
     if manifest_path and skill:
         console.print(
@@ -191,9 +191,19 @@ def run_skill(
     sync: bool = typer.Option(True, "--sync/--async", help="Sync (wait) or async (schedule)"),
     watch: bool = typer.Option(False, "--watch", "-w", help="Watch async execution progress"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    remote: bool = typer.Option(
+        False, "--remote", help="Execute the installed project Skill (by name or id) via MCP"
+    ),
+    message: str | None = typer.Option(
+        None, "--message", "-m", help="--remote: user message for the skill's agent context"
+    ),
+    timeout: float = typer.Option(30.0, "--timeout", help="--remote: MCP timeout in seconds"),
 ):
-    """Resolve a skill entrypoint into the existing agent/workflow runtime."""
-    _ensure_constructor_installed()
+    """Run a skill: --remote executes the installed project Skill via the pod's MCP
+    (submit-only — prints a skill_run_id for `skills result`); otherwise resolves a
+    local skill.yml entrypoint into the agent/workflow runtime."""
+    if remote:
+        return _run_remote(skill_name, params, message, project_id, json_output, timeout)
     manifest_path, skill = _load_skill_manifest(skill_name)
     if not skill:
         console.print(f"[red]Skill manifest not found for:[/red] {skill_name}")
@@ -282,3 +292,323 @@ def constructor_bridge(
             border_style="#FF5C1F",
         )
     )
+
+
+# --- Installed project Skills (remote, through the pod's MCP tools) ----------
+#
+# Discovery (show/docs/result) is read-only. Only `run --remote` executes, and it
+# is submit-only: registration/acceptance is never reported as a completed run.
+
+SKILL_SCHEMA = "machina.skill/v1"
+_SKILL_FIELDS = ("name", "title", "description", "version", "status", "category", "domain")
+_TERMINAL = {"executed": "completed", "completed": "completed", "failed": "failed"}
+_EXIT = {"completed": 0, "failed": 1, "partial": 2}
+
+
+def _is_object_id(value: str) -> bool:
+    return len(value) == 24 and all(c in "0123456789abcdef" for c in value.lower())
+
+
+async def _get_skill(session, ref: str) -> dict:
+    if _is_object_id(ref):
+        skill = await mcp_session.call(session, "get_skill", {"item_id": ref})
+    else:
+        skill = await mcp_session.call(session, "get_skill_by_name", {"name": ref})
+    if not isinstance(skill, dict) or not skill.get("_id"):
+        raise mcp_session.MCPConnectError("not_found", f"skill '{ref}' not found")
+    return skill
+
+
+def _skill_view(skill: dict) -> dict:
+    """Identity + supplied metadata only. Fields the server didn't supply are
+    listed in `missing`, never synthesised. `instruction_only` is read from the
+    supplied entrypoints (workflows/agents), not from the name."""
+    workflows = skill.get("workflows") or []
+    agents = skill.get("agents") or []
+    view = {"id": skill.get("_id")}
+    view.update({field: skill.get(field) for field in _SKILL_FIELDS})
+    view.update(
+        {
+            "workflows": workflows,
+            "agents": agents,
+            "documents": [
+                {"id": doc.get("_id"), "name": doc.get("name"), "title": doc.get("title")}
+                for doc in skill.get("documents") or []
+                if isinstance(doc, dict)
+            ],
+            "instruction_only": not workflows and not agents,
+            "missing": [field for field in _SKILL_FIELDS if skill.get(field) in (None, "", [])],
+        }
+    )
+    return view
+
+
+def _remote(project_id, json_output, timeout, work):
+    from machina_cli.commands.mcp import fail, resolve_base_url
+    from machina_cli.config import resolve_auth_token
+
+    project_id, base_url = resolve_base_url(project_id, json_output)
+    try:
+        _, result = mcp_session.run(base_url, resolve_auth_token(), work, timeout)
+    except mcp_session.MCPConnectError as error:
+        fail(error, json_output)
+    return project_id, result
+
+
+def _print_json(payload: dict):
+    import json
+
+    print(json.dumps(payload, default=str))
+
+
+@app.command("show")
+def show_skill(
+    skill: str = typer.Argument(..., help="Installed project Skill name or id"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    timeout: float = typer.Option(30.0, "--timeout", help="MCP timeout in seconds"),
+):
+    """Show an installed project Skill: identity, entrypoints, ordered documents (read-only)."""
+    project_id, record = _remote(project_id, json_output, timeout, lambda s: _get_skill(s, skill))
+    view = _skill_view(record)
+    if json_output:
+        _print_json({"schema": SKILL_SCHEMA, "project_id": project_id, "skill": view})
+        return
+
+    def show(value):
+        return value if value not in (None, "", []) else "[dim]not supplied[/dim]"
+
+    console.print(
+        Panel.fit(
+            f"[bold]Id:[/bold] {view['id']}\n"
+            f"[bold]Name:[/bold] {show(view['name'])}\n"
+            f"[bold]Title:[/bold] {show(view['title'])}\n"
+            f"[bold]Version:[/bold] {show(view['version'])}\n"
+            f"[bold]Source:[/bold] {show(view['domain'])}\n"
+            f"[bold]Registry status:[/bold] {show(view['status'])}\n"
+            f"[bold]Description:[/bold] {show(view['description'])}",
+            title=f"Skill · {project_id}",
+            border_style="#FF5C1F",
+        )
+    )
+    if view["instruction_only"]:
+        console.print("[yellow]Instruction-only:[/yellow] no workflow/agent entrypoints supplied.")
+    for kind in ("workflows", "agents"):
+        for entry in view[kind]:
+            label = entry.get("name") if isinstance(entry, dict) else entry
+            console.print(f"  [bold]{kind[:-1]}:[/bold] {label}")
+    for index, doc in enumerate(view["documents"], 1):
+        console.print(f"  [bold]doc {index}:[/bold] {doc['name']}  [dim]{doc['id']}[/dim]")
+    if view["documents"]:
+        console.print(f"[dim]Read them with[/dim] machina skills docs {skill}")
+
+
+@app.command("docs")
+def skill_docs(
+    skill: str = typer.Argument(..., help="Installed project Skill name or id"),
+    name: str | None = typer.Option(None, "--name", "-n", help="Only the document with this name"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    timeout: float = typer.Option(30.0, "--timeout", help="MCP timeout in seconds"),
+):
+    """Read an installed Skill's linked documents (instructions/references), in order."""
+
+    async def work(session):
+        record = await _get_skill(session, skill)
+        refs = _skill_view(record)["documents"]
+        if name:
+            refs = [doc for doc in refs if doc["name"] == name]
+        documents = []
+        for ref in refs:
+            try:
+                doc = await mcp_session.call(session, "get_document", {"item_id": ref["id"]})
+            except mcp_session.MCPConnectError as error:
+                if error.code not in ("not_found", "tool_failed"):
+                    raise  # auth denials are not a "missing reference"
+                documents.append({**ref, "error": error.message})
+                continue
+            documents.append(
+                {
+                    **ref,
+                    "filetype": doc.get("filetype") if isinstance(doc, dict) else None,
+                    "value": doc.get("value") if isinstance(doc, dict) else doc,
+                }
+            )
+        return record, documents
+
+    project_id, (record, documents) = _remote(project_id, json_output, timeout, work)
+    missing = [doc for doc in documents if "error" in doc]
+    if json_output:
+        _print_json(
+            {
+                "schema": SKILL_SCHEMA,
+                "project_id": project_id,
+                "skill": {"id": record.get("_id"), "name": record.get("name")},
+                "documents": documents,
+            }
+        )
+    else:
+        for doc in documents:
+            console.rule(f"{doc['name']} · {doc['id']}")
+            if "error" in doc:
+                console.print(f"[red]Unavailable:[/red] {doc['error']}")
+            elif isinstance(doc["value"], str):
+                console.print(Text(doc["value"]))
+            else:
+                console.print_json(data=doc["value"])
+    if not documents:
+        if not json_output:
+            console.print(
+                "[yellow]No linked documents"
+                + (f" named '{name}'" if name else "")
+                + " — this Skill supplies none.[/yellow]"
+            )
+        raise typer.Exit(1)
+    if missing:
+        # A missing reference is a non-success outcome, never an empty success.
+        raise typer.Exit(1)
+
+
+def _params_to_context(params: list[str] | None) -> dict:
+    context = {}
+    for item in params or []:
+        if "=" not in item:
+            console.print(f"[red]Invalid parameter (expected key=value):[/red] {item}")
+            raise typer.Exit(1)
+        key, value = item.split("=", 1)
+        context[key] = value
+    return context
+
+
+def _run_remote(skill, params, message, project_id, json_output, timeout):
+    context_agent = _params_to_context(params)
+    messages = [{"role": "user", "content": message}] if message else []
+    if messages:
+        context_agent["messages"] = messages
+    state = {"submitted": False}
+
+    async def work(session):
+        record = await _get_skill(session, skill)
+        if _skill_view(record)["instruction_only"]:
+            raise mcp_session.MCPConnectError(
+                "instruction_only",
+                f"skill '{record.get('name')}' supplies no workflow/agent entrypoint to execute; "
+                f"read it with `machina skills docs {skill}`",
+            )
+        state["submitted"] = True
+        args = {
+            "skill_id": record["_id"],
+            "messages": messages,
+            "context": {"context-agent": context_agent},
+        }
+        is_error, data, text = mcp_session.tool_payload(
+            await session.call_tool("execute_skill", args)
+        )
+        if is_error:
+            raise mcp_session.tool_error("execute_skill", text)
+        run_id = data.get("skill_run_id") if isinstance(data, dict) else None
+        inner = mcp_session.unwrap("execute_skill", data)
+        run_id = run_id or (inner.get("skill_run_id") if isinstance(inner, dict) else None)
+        return record, run_id, inner
+
+    from machina_cli.commands.mcp import fail, resolve_base_url
+    from machina_cli.config import resolve_auth_token
+
+    project_id, base_url = resolve_base_url(project_id, json_output)
+    try:
+        _, (record, run_id, inner) = mcp_session.run(base_url, resolve_auth_token(), work, timeout)
+    except mcp_session.MCPConnectError as error:
+        if state["submitted"] and error.code == "endpoint_unavailable":
+            # The request may have reached the server: never resubmit blindly.
+            error = mcp_session.MCPConnectError(
+                "submission_unknown",
+                "submission may have run — check `machina execution` / Studio before retrying; "
+                "it was not resubmitted",
+            )
+        fail(error, json_output)
+
+    if not run_id:
+        fail(
+            mcp_session.MCPConnectError(
+                "submission_unknown", "execute_skill returned no skill_run_id; outcome unknown"
+            ),
+            json_output,
+        )
+    payload = {
+        "schema": "machina.skill.run/v1",
+        "project_id": project_id,
+        "skill": {"id": record.get("_id"), "name": record.get("name")},
+        "outcome": "accepted",
+        "skill_run_id": run_id,
+        "task_id": inner.get("task_id") if isinstance(inner, dict) else None,
+        "result_command": f"machina skills result {run_id}",
+    }
+    if json_output:
+        _print_json(payload)
+        return
+    console.print(f"[bold]Skill:[/bold] {record.get('name')}  [dim]{record.get('_id')}[/dim]")
+    console.print(f"[yellow]Accepted (not completed):[/yellow] skill_run_id {run_id}")
+    console.print(f"[dim]Retrieve the outcome with[/dim] {payload['result_command']}")
+
+
+def _skill_outcome(run: dict) -> str:
+    """Normalise a skill run onto accepted/running/completed/failed/partial/unknown.
+    A server-supplied `outcome` wins; otherwise map the run record's own status."""
+    if run.get("outcome"):
+        return str(run["outcome"])
+    status = str(run.get("status") or "").lower()
+    outcome = _TERMINAL.get(status)
+    if outcome == "completed":
+        done, total = run.get("completed_workflows"), run.get("total_workflows")
+        if isinstance(done, int) and isinstance(total, int) and done < total:
+            return "partial"
+        return "completed"
+    if outcome:
+        return outcome
+    return {"scheduled": "accepted", "executing": "running"}.get(status, "unknown")
+
+
+@app.command("result")
+def skill_result(
+    skill_run_id: str = typer.Argument(..., help="skill_run_id returned by `skills run --remote`"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    timeout: float = typer.Option(30.0, "--timeout", help="MCP timeout in seconds"),
+):
+    """Retrieve a remote skill run's persisted outcome (read-only, never resubmits).
+
+    Exit codes: 0 completed, 1 failed, 2 partial, 3 not finished yet / unknown.
+    """
+
+    async def work(session):
+        return await mcp_session.call(
+            session, "get_skill_execution", {"skill_run_id": skill_run_id, "compact": False}
+        )
+
+    project_id, run = _remote(project_id, json_output, timeout, work)
+    if not isinstance(run, dict) or not run:
+        from machina_cli.commands.mcp import fail
+
+        fail(mcp_session.MCPConnectError("not_found", f"no skill run {skill_run_id}"), json_output)
+    outcome = _skill_outcome(run)
+    if json_output:
+        _print_json(
+            {
+                "schema": "machina.skill.result/v1",
+                "project_id": project_id,
+                "skill_run_id": skill_run_id,
+                "outcome": outcome,
+                "status": run.get("status"),
+                "error": run.get("error"),
+                "execution": run,
+            }
+        )
+    else:
+        style = {"completed": "green", "failed": "red", "partial": "yellow"}.get(outcome, "cyan")
+        console.print(f"[bold]Run:[/bold] {skill_run_id}  [{style}]{outcome}[/{style}]")
+        console.print(f"[bold]Status:[/bold] {run.get('status')}")
+        if run.get("error"):
+            console.print(f"[red]Error:[/red] {run['error']}")
+        if outcome in ("completed", "partial", "failed") and run.get("response") is not None:
+            console.print_json(data=run["response"], default=str)
+    raise typer.Exit(_EXIT.get(outcome, 3))
