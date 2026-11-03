@@ -36,7 +36,10 @@ class FakeClientAPI:
                     "workflows": [{"name": "wf-a"}],
                 }
             },
-            "workflow": {},
+            # The workflow the agent above calls, so round trips stay valid.
+            "workflow": {
+                "65f0c0ffee0000000000ef00": {"_id": "65f0c0ffee0000000000ef00", "name": "wf-a"}
+            },
         }
         self.requests: list[tuple[str, str, dict | None]] = []
         self.force: tuple[int, dict] | None = None
@@ -281,3 +284,34 @@ def test_delete_interactive_abort_keeps_record(api):
     result = runner.invoke(app, ["agent", "delete", "scout", "--project", "proj_1"], input="n\n")
     assert result.exit_code != 0
     assert AGENT_ID in api.store["agent"]
+
+
+# --- references (DX-02: no dangling workflow/skill calls) ---------------------
+
+
+def test_create_refuses_unknown_workflow_reference_without_writing(api, tmp_path):
+    body = {
+        "name": "fresh",
+        "workflows": [{"name": "ghost-workflow"}, {"name": "ghost-skill", "type": "skill"}],
+    }
+    api.store["skill"] = {}
+    result = _run("agent", "create", "--file", _file(tmp_path, body), "--json")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_code"] == "invalid_reference"
+    assert "ghost-workflow" in payload["error"] and "ghost-skill" in payload["error"]
+    assert not [r for r in api.requests if r[0] == "POST"]
+
+
+def test_create_accepts_existing_references(api, tmp_path):
+    body = {"name": "fresh", "workflows": [{"name": "wf-a"}]}
+    result = _run("agent", "create", "--file", _file(tmp_path, body), "--json")
+    assert result.exit_code == 0, result.output
+
+
+def test_update_checks_new_references(api, tmp_path):
+    body = {"workflows": [{"name": "not-there"}]}
+    result = _run("agent", "update", "scout", "--file", _file(tmp_path, body), "--json")
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_code"] == "invalid_reference"
+    assert not [r for r in api.requests if r[0] == "PUT"]

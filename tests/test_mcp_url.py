@@ -102,7 +102,7 @@ def test_mcp_url_probe_success_reports_negotiated_transport():
     }
     assert probe.call_args.args[:2] == (
         "https://acme-proj.org.machina.gg",
-        ("X-Api-Token", _TOKEN),
+        {"X-Api-Token": _TOKEN},
     )
     assert _TOKEN not in result.output
 
@@ -176,3 +176,60 @@ def test_mcp_url_console_probe_failure_exits_nonzero():
     assert result.exit_code == 1
     assert "timed out" in result.output
     assert _TOKEN not in result.output
+
+
+_SESSION = "eyJsession.payload.sig-0123456789abcdef"
+_PROJECT_TOKEN = "eyJproject.payload.sig-0123456789abcdef"
+
+
+def _session_client():
+    client = _mock_project_client()
+    client.return_value.direct_api_key = False
+    client.return_value.project_token = _PROJECT_TOKEN
+    return client
+
+
+def test_session_login_probes_with_session_and_project_token():
+    with (
+        patch("machina_cli.commands.mcp.get_config", return_value="proj_1"),
+        patch("machina_cli.commands.mcp.ProjectClient", _session_client()),
+        patch(
+            "machina_cli.commands.mcp.resolve_auth_token",
+            return_value=("X-Session-Token", _SESSION),
+        ),
+        patch("machina_cli.mcp_session.probe", return_value=_PROBED) as probe,
+    ):
+        result = runner.invoke(app, ["mcp", "url", "proj_1", "--json", "--probe"])
+    assert result.exit_code == 0
+    assert probe.call_args.args[1] == {
+        "X-Session-Token": _SESSION,
+        "X-Project-Token": _PROJECT_TOKEN,
+    }
+
+
+def test_session_flag_masks_both_headers_unless_revealed():
+    with (
+        patch("machina_cli.commands.mcp.get_config", return_value="proj_1"),
+        patch("machina_cli.commands.mcp.ProjectClient", _session_client()),
+        patch(
+            "machina_cli.commands.mcp.resolve_auth_token",
+            return_value=("X-Session-Token", _SESSION),
+        ),
+    ):
+        masked = runner.invoke(app, ["mcp", "url", "proj_1", "--json", "--session"])
+        revealed = runner.invoke(app, ["mcp", "url", "proj_1", "--json", "--session", "--reveal"])
+    payload = json.loads(masked.output)
+    assert set(payload["headers"]) == {"X-Session-Token", "X-Project-Token"}
+    assert _SESSION not in masked.output and _PROJECT_TOKEN not in masked.output
+    assert json.loads(revealed.output)["headers"]["X-Project-Token"] == _PROJECT_TOKEN
+
+
+def test_session_flag_refuses_an_api_key():
+    with (
+        patch("machina_cli.commands.mcp.get_config", return_value="proj_1"),
+        patch("machina_cli.commands.mcp.ProjectClient", _mock_project_client()),
+        patch("machina_cli.commands.mcp.resolve_auth_token", return_value=("X-Api-Token", _TOKEN)),
+    ):
+        result = runner.invoke(app, ["mcp", "url", "proj_1", "--json", "--session"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_code"] == "missing_credentials"

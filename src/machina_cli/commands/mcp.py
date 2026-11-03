@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.text import Text
 
 from machina_cli import mcp_session, ui
+from machina_cli.commands.credentials import _mask_key
 from machina_cli.config import get_config, resolve_auth_token
 from machina_cli.mcp_session import MCPConnectError
 from machina_cli.project_client import ProjectClient
@@ -91,6 +92,23 @@ def resolve_base_url(project_id: str | None, json_output: bool) -> tuple[str, st
     return project_id, client.api_url
 
 
+def mcp_auth(project_id: str) -> dict[str, str]:
+    """Headers the CLI presents to the project's MCP server.
+
+    An API key (env or stored) is sent alone: Core gives it precedence and it
+    must never be mixed with a human context. A signed-in human sends the
+    session token together with the project token minted for that same user,
+    which is what project reads and human-authored writes (eval authoring)
+    require. The pair is never lent to anyone: it is the caller's own login.
+    """
+    header_name, token = resolve_auth_token()
+    if header_name == "X-Session-Token" and token:
+        client = ProjectClient(project_id)
+        if not client.direct_api_key and client.project_token:
+            return {"X-Session-Token": token, "X-Project-Token": client.project_token}
+    return {header_name: token} if header_name and token else {}
+
+
 def probe_or_fail(base_url: str, auth: tuple[str, str], json_output: bool, timeout: float):
     try:
         return mcp_session.probe(base_url, auth, timeout=timeout)
@@ -112,6 +130,15 @@ def url(
     timeout: float = typer.Option(
         mcp_session.DEFAULT_TIMEOUT, "--timeout", help="Probe timeout in seconds"
     ),
+    session: bool = typer.Option(
+        False,
+        "--session",
+        help="Use your own login (X-Session-Token + X-Project-Token), needed for "
+        "human-authored writes such as eval configs",
+    ),
+    reveal: bool = typer.Option(
+        False, "--reveal", help="With --session: print the header values unmasked"
+    ),
 ):
     """Resolve a project's MCP endpoint (URL, transport, auth header).
 
@@ -123,9 +150,26 @@ def url(
 
     probed = None
     if probe:
-        probed = probe_or_fail(base_url, resolve_auth_token(), json_output, timeout)
+        probed = probe_or_fail(base_url, mcp_auth(project_id), json_output, timeout)
 
     payload = connection_payload(project_id, base_url, _MCP_AUTH_HEADER, probed)
+    if session:
+        # The signed-in human's own credentials, for an agent session that must
+        # author (e.g. eval configs). Masked unless --reveal; session tokens
+        # expire with the login.
+        headers = mcp_auth(project_id)
+        if "X-Project-Token" not in headers:
+            fail(
+                MCPConnectError(
+                    "missing_credentials",
+                    "--session needs a `machina login` session (an API key is in use)",
+                ),
+                json_output,
+            )
+        payload["auth_header"] = "X-Session-Token+X-Project-Token"
+        payload["headers"] = {
+            name: (value if reveal else _mask_key(value)) for name, value in headers.items()
+        }
     if json_output:
         print(json.dumps(payload))
         return
@@ -197,7 +241,7 @@ def tools(
     project_id, base_url = resolve_base_url(project_id, json_output)
     try:
         meta, served = mcp_session.run(
-            base_url, resolve_auth_token(), mcp_session.list_all_tools, timeout
+            base_url, mcp_auth(project_id), mcp_session.list_all_tools, timeout
         )
     except MCPConnectError as error:
         fail(error, json_output)

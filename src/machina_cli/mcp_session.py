@@ -436,13 +436,15 @@ def run(
     """
     import anyio
 
-    header_name, token = auth
-    if not header_name or not token:
+    # `auth` is one (header, token) pair, or a header mapping when the caller
+    # authenticates as a signed-in human (session + project token together).
+    pairs = auth.items() if isinstance(auth, dict) else [auth]
+    headers = {name: token for name, token in pairs if name and token}
+    if not headers:
         # Never connect anonymously: a legacy server may lend its own token.
         raise MCPConnectError("missing_credentials", "not authenticated")
     if not base_url:
         raise MCPConnectError("wrong_project", "project has no client-api address")
-    headers = {header_name: token}
     return anyio.run(_resolve_and_run, base_url, headers, timeout, work)
 
 

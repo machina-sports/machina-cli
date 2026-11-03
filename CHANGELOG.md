@@ -2,6 +2,15 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.10.1] - 2026-11-03
+
+### Added
+- `machina mcp url --session [--reveal]`: hands an agent your own login (`X-Session-Token` + `X-Project-Token` of the same user) for human-authored writes such as eval configs (DX-05). Masked unless `--reveal`; refuses when an API key is in use.
+
+### Fixed
+- MCP calls made with a `machina login` session (`mcp url --probe`, `mcp tools`, remote `skills`) now send the project token with the session, so project reads no longer fail with 403.
+- `agent create|update --file` refuses `workflows[]` entries that call workflows/skills missing from the project (`invalid_reference`), before writing (DX-02).
+
 ## [0.10.0] - 2026-11-03
 
 Agent-first DX (epic 17tpepctxnh): the CLI now drives a project end to end without Studio detours.
