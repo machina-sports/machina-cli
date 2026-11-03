@@ -4,6 +4,7 @@ import typer
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+from machina_cli.execution_outcome import agent_outcome, get_workflow_run, workflow_outcome
 from machina_cli.project_client import ProjectClient
 from machina_cli.ui import (
     cell,
@@ -22,15 +23,27 @@ app = typer.Typer(help="Execution management")
 
 @app.command("get")
 def get_execution(
-    execution_id: str = typer.Argument(..., help="Agent execution ID"),
+    execution_id: str = typer.Argument(
+        ..., help="agent_run_id (or workflow_run_id with --workflow)"
+    ),
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     compact: bool = typer.Option(
         False, "--compact", "-c", help="Compact output (no workflow details)"
     ),
+    workflow: bool = typer.Option(
+        False, "--workflow", help="The id is a workflow_run_id (from `workflow run --async`)"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """Get execution details by ID."""
+    """Get an execution by id, with its normalised outcome.
+
+    Read-only — it never resubmits. `outcome` is one of accepted, running,
+    completed, failed, partial, unknown (a server-supplied `outcome` wins).
+    """
     client = ProjectClient(project_id)
+    if workflow:
+        return _get_workflow_run(client, execution_id, json_output)
+
     compact_param = "true" if compact else "false"
     result = client.get(f"execution/agent-run/{execution_id}?compact={compact_param}")
 
@@ -39,7 +52,8 @@ def get_execution(
     if json_output:
         import json
 
-        console.print_json(json.dumps(data, default=str))
+        payload = {**data, "outcome": agent_outcome(data)} if isinstance(data, dict) else data
+        console.print_json(json.dumps(payload, default=str))
         return
 
     if not data or not isinstance(data, dict):
@@ -76,6 +90,7 @@ def get_execution(
 
     header = (
         f"[bold]Name:[/bold] {data.get('name', 'N/A')}\n"
+        f"[bold]Outcome:[/bold] {agent_outcome(data)}\n"
         f"[bold]Status:[/bold] [{color}]{status}[/{color}]\n"
         f"[bold]ID:[/bold] {data.get('_id', 'N/A')}\n"
         f"[bold]Time:[/bold] {exec_time_str}\n"
@@ -120,6 +135,42 @@ def get_execution(
                 cell(wf.get("_id", ""), style="dim"),
             )
         console.print(table)
+
+
+def _get_workflow_run(client: ProjectClient, run_id: str, json_output: bool):
+    import json
+
+    run = get_workflow_run(client, run_id)
+    outcome = workflow_outcome(run)
+    if json_output:
+        console.print_json(json.dumps({**run, "outcome": outcome}, default=str))
+        return
+    if not run:
+        console.print("[yellow]No execution data found.[/yellow]")
+        return
+    audit = run.get("audit") or {}
+    console.print(
+        Panel(
+            f"[bold]Name:[/bold] {run.get('name', 'N/A')}\n"
+            f"[bold]Outcome:[/bold] {outcome}\n"
+            f"[bold]Status:[/bold] {run.get('status', 'unknown')}\n"
+            f"[bold]ID:[/bold] {run.get('_id', run_id)}\n"
+            f"[bold]Finished:[/bold] {str(audit.get('finished_time', ''))[:19]}"
+            + (
+                f"\n[bold]Reason:[/bold] [red]{audit['reason']}[/red]"
+                if audit.get("reason")
+                else ""
+            ),
+            title="Workflow execution",
+            border_style="#FF5C1F",
+        )
+    )
+    outputs = run.get("outputs")
+    if outputs:
+        formatted = json.dumps(outputs, indent=2, default=str, ensure_ascii=False)
+        if len(formatted) > 2000:
+            formatted = formatted[:2000] + "\n... (use --json for full output)"
+        console.print(Panel(Syntax(formatted, "json", theme="monokai"), title="Outputs"))
 
 
 @app.command("list")

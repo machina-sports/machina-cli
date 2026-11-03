@@ -256,7 +256,9 @@ def run_skill(
             params=params,
             project_id=project_id,
             sync=sync,
+            wait=False,
             watch=watch,
+            timeout=300.0,
             json_output=json_output,
         )
 
@@ -265,7 +267,9 @@ def run_skill(
         params=params,
         project_id=project_id,
         sync=sync,
+        wait=False,
         watch=watch,
+        timeout=300.0,
         json_output=json_output,
     )
 
