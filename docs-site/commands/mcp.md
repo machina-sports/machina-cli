@@ -53,6 +53,27 @@ Failures exit `1` with a typed envelope — `{"schema", "error", "error_code", "
 
 Credentials never appear in output, errors or logs.
 
+## `tools` — discover the project's capabilities
+
+```text
+machina mcp tools [project_id] [--search <q>] [--describe <name>] [--json] [--timeout <s>]
+```
+
+Read-only: connects with the same transport resolution and credentials as `url --probe`, walks the server's **full `tools/list` cursor pagination**, and never calls a tool.
+
+| Flag | Purpose |
+|------|---------|
+| `--search`, `-s` | Case-insensitive match on tool name/title/description (applied after the full walk). |
+| `--describe`, `-d` | One tool exactly as served: name, title, description, `inputSchema`, `outputSchema`, annotations. |
+| `--json`, `-j` | Schema `machina.mcp.tools/v1`: `{project_id, url, transport, protocol_version, search, total, count, tools: [{name, title, summary, required}]}`; with `--describe`, `{..., tool: {...as served}}`. |
+
+```bash
+machina mcp tools --search skill
+machina mcp tools --describe execute_skill --json
+```
+
+The compact list carries only what the server supplies (`required` is read from the tool's `inputSchema`); the CLI does not infer "executable" or prerequisite flags. An unknown `--describe` name fails with `error_code: tool_not_found`.
+
 ## Related
 
 - [`connect`](/commands/connect) — resolve the endpoint **and** pair the auth token for an external agent (e.g. sportsclaw), with `--mint` for a durable dedicated key.

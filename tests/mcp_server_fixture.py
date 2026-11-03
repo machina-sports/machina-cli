@@ -27,6 +27,7 @@ def build_server(
     health: str = "ok",
     tools: int = 0,
     page_size: int | None = None,
+    calls: list | None = None,
     read: str | None = "ok",
 ) -> FastMCP:
     server = FastMCP(
@@ -40,6 +41,8 @@ def build_server(
     @server.tool(structured_output=True)
     async def health_check() -> dict[str, Any]:
         """Return stable status, message and data health fields."""
+        if calls is not None:
+            calls.append("health_check")
         if health == "denied":
             raise ValueError("Upstream API rejected authentication (HTTP 403)")
         if health == "expired":
