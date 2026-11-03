@@ -37,7 +37,7 @@ def test_probe_streamable_http_ready():
     assert result["protocol_version"]
     assert result["server"]["name"] == "machina-test"
     assert result["health_check"] == "ok"
-    assert result["tool_count"] == 1
+    assert result["tool_count"] == 2  # health_check + search_agents
 
 
 def test_probe_legacy_sse_fallback_on_404():
@@ -109,7 +109,7 @@ def test_health_check_failure_is_not_ready(health, code):
 def test_tools_list_pagination_is_walked():
     with serve(modern_app(tools=25, page_size=4)) as base:
         result = mcp_session.probe(base, AUTH, timeout=5)
-    assert result["tool_count"] == 26
+    assert result["tool_count"] == 27
 
 
 def test_incompatible_server_without_health_check():
@@ -146,3 +146,26 @@ def test_error_payload_never_contains_token():
     dumped = json.dumps(error.to_payload())
     assert "sk-wrong-secret-value" not in dumped
     assert error.to_payload()["schema"] == mcp_session.SCHEMA
+
+
+@pytest.mark.parametrize(
+    ("read", "code"), [("expired", "expired_credentials"), ("denied", "access_denied")]
+)
+def test_health_check_alone_does_not_prove_the_credential(read, code):
+    # health_check succeeds without checking the token; the authenticated
+    # read is what rejects a wrong credential.
+    with serve(modern_app(read=read)) as base:
+        error = _error(base)
+    assert error.code == code
+
+
+def test_probe_reports_the_authenticated_read():
+    with serve(modern_app()) as base:
+        result = mcp_session.probe(base, AUTH, timeout=5)
+    assert result["authenticated_read"] == "search_agents"
+
+
+def test_profile_without_project_reads_is_not_claimed_authenticated():
+    with serve(modern_app(read=None)) as base:
+        result = mcp_session.probe(base, AUTH, timeout=5)
+    assert result["authenticated_read"] is None

@@ -179,6 +179,11 @@ def _classify(exc: BaseException, url: str, transport: str) -> MCPConnectError:
     )
 
 
+# Read-only project searches the probe may use to prove the credential, in
+# order of preference. Product profiles that expose none of them are reported
+# with authenticated_read=None (credential not proven by the probe).
+_AUTH_READ_TOOLS = ("search_agents", "search_workflows", "search_documents")
+
 _DENIAL_PATTERNS = (
     (re.compile(r"HTTP 401"), "expired_credentials"),
     (re.compile(r"HTTP 403"), "access_denied"),
@@ -411,7 +416,22 @@ async def _probe_work(session: Any) -> dict:
             "health_check_failed",
             f"health_check did not report success{f' ({detail})' if detail else ''}",
         )
-    return {"tool_count": len(tools), "health_check": "ok"}
+    # health_check answers without touching project data (the client-api health
+    # route is unauthenticated, and the stateless /mcp only checks that a token
+    # is present), so it cannot tell a valid credential from a wrong one. One
+    # authenticated, read-only, single-item search proves the credential.
+    names = {tool.name for tool in tools}
+    read_tool = next((name for name in _AUTH_READ_TOOLS if name in names), None)
+    if read_tool:
+        result = await session.call_tool(read_tool, {"page_size": 1, "fields": ["_id"]})
+        is_error, data, text = tool_payload(result)
+        if is_error:
+            raise tool_error(read_tool, text)
+        if isinstance(data, dict) and (
+            data.get("status") in ("error", False) or data.get("error_code")
+        ):
+            raise tool_error(read_tool, f"{data.get('message') or ''} {data.get('details') or ''}")
+    return {"tool_count": len(tools), "health_check": "ok", "authenticated_read": read_tool}
 
 
 def probe(base_url: str, auth: tuple[str, str], timeout: float = DEFAULT_TIMEOUT) -> dict:
