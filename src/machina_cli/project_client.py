@@ -122,6 +122,12 @@ _ERROR_CODES = {
 }
 
 
+def _body_failed(status) -> bool:
+    if status in ("error", False):
+        return True
+    return isinstance(status, int) and not isinstance(status, bool) and status >= 400
+
+
 class ProjectAPIError(SystemExit):
     """A rejected Client API request.
 
@@ -201,7 +207,7 @@ class ProjectClient:
             elif isinstance(error, list):
                 details = error
             error_msg = error_msg or (
-                data.get("message", "") if data.get("status") in (False, "error") else ""
+                data.get("message", "") if _body_failed(data.get("status")) else ""
             )
 
         status = response.status_code
@@ -222,8 +228,9 @@ class ProjectClient:
             raise ProjectAPIError(error_msg or fallback.rstrip("."), status, details)
 
         # A 200 whose body says it failed is a failure: the legacy controllers
-        # return {"status": false, "error": {...}} with HTTP 200.
-        if isinstance(data, dict) and data.get("status") in ("error", False):
+        # return {"status": false, "error": {...}} with HTTP 200 (and the agent
+        # executor's not-found is {"status": 404, "message": ...}).
+        if isinstance(data, dict) and _body_failed(data.get("status")):
             console.print(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
             raise ProjectAPIError(error_msg or "request failed", status, details)
 

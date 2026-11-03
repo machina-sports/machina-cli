@@ -120,6 +120,14 @@ def test_status_false_in_http_200_is_a_failure(api):
     assert info.value.code != 0
 
 
+def test_numeric_error_status_in_http_200_is_a_failure(api):
+    # agent/executor/<name> answers {"status": 404, "message": "Item not found"} with HTTP 200
+    api.force = (200, {"status": 404, "message": "Item not found"})
+    with pytest.raises(ProjectAPIError) as info:
+        ProjectClient("proj_1").post("agent/executor/ghost", {})
+    assert info.value.message == "Item not found"
+
+
 @pytest.mark.parametrize(
     ("status", "code"),
     [(400, "invalid_request"), (409, "conflict"), (422, "invalid_request"), (500, "server_error")],
