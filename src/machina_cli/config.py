@@ -76,6 +76,24 @@ def get_credential(key: str) -> str | None:
     return _load_creds().get(key)
 
 
+def store_session_token(token: str):
+    """Store a session token, evicting any stored API key.
+
+    resolve_auth_token() ranks a stored api_key ABOVE a session_token, so an API
+    key left over from an earlier `login --api-key` (or from a project-scoped key)
+    silently shadows every subsequent browser/password login: the CLI prints
+    "Login successful." and then fails every request with "Invalid API Key", and
+    no amount of re-running `machina login` clears it.
+
+    Logging in as a user supersedes whatever key was there, so drop it in the same
+    write that stores the new token.
+    """
+    creds = _load_creds()
+    creds.pop("api_key", None)
+    creds["session_token"] = token
+    _save_creds(creds)
+
+
 def _clear_credential(key: str):
     """Remove a single credential from ~/.machina/credentials.json."""
     creds = _load_creds()

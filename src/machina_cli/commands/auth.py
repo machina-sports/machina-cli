@@ -12,6 +12,7 @@ from machina_cli.config import (
     get_config,
     resolve_auth_token,
     store_credential,
+    store_session_token,
 )
 
 app = typer.Typer(help="Authentication commands")
@@ -129,7 +130,7 @@ def do_login(
             console.print("[red]Login failed: no token received.[/red]")
             raise typer.Exit(1)
 
-        store_credential("session_token", token)
+        store_session_token(token)
         console.print("[green]Login successful.[/green]")
         return
 
@@ -140,7 +141,7 @@ def do_login(
 
     token = browser_login(session_url)
     if token:
-        store_credential("session_token", token)
+        store_session_token(token)
         console.print("[green]Login successful.[/green]")
 
         # Try to show who logged in
