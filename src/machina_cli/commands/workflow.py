@@ -197,9 +197,10 @@ def run_workflow(
             console.print()
             console.print("  [dim]No inputs provided, running with defaults.[/dim]")
 
-    body = {}
-    if context:
-        body["context-workflow"] = context
+    # /workflow/execute/<name> and /workflow/schedule/<name> already wrap the JSON body as the
+    # run's "context-workflow" (client-api core/workflow/routes.py), so the inputs go at the top
+    # level. Wrapping them here nested them one level too deep and the workflow saw no inputs.
+    body = dict(context)
 
     if not json_output:  # --json keeps stdout to the one result document
         console.print()
