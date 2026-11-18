@@ -2,6 +2,11 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.10.2] - 2026-11-18
+
+### Fixed
+- `machina workflow run <name> key=value` now delivers the params as the workflow's inputs. They were sent wrapped in `context-workflow`, which `/workflow/execute` and `/workflow/schedule` already apply, so every input arrived as `None` (e.g. `api-football-get-fixtures team=50` failed with "At least one parameter is required"). Applies to sync and `--async` runs (#88).
+
 ## [0.10.1] - 2026-11-03
 
 ### Added
