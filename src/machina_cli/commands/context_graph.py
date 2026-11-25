@@ -16,6 +16,7 @@ import typer
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import warn
 from machina_cli.ui import cell, console, emit_json, extract_collection, make_table
 
 app = typer.Typer(help="Context Graph — self-healing status")
@@ -288,7 +289,7 @@ def status(
         return
 
     if not rows:
-        console.print("[yellow]No projects have self-healing provisioned (or reachable).[/yellow]")
+        warn("No projects have self-healing provisioned (or reachable).")
         return
     table = make_table("Self-healing across the org", expand=True)
     table.add_column("Project", ratio=3, overflow="ellipsis")
@@ -597,7 +598,7 @@ def timeline(
         return
 
     if not rows:
-        console.print(f"[yellow]No self-healing events in the last {days} day(s).[/yellow]")
+        warn(f"No self-healing events in the last {days} day(s).")
         return
     table = make_table(f"Self-healing timeline — last {days} day(s)", expand=True)
     table.add_column("Time (UTC)", no_wrap=True)

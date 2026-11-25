@@ -13,6 +13,7 @@ import json as json_lib
 import typer
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import err, ok
 from machina_cli.ui import (
     cell,
     console,
@@ -125,13 +126,13 @@ def _resolve(request_id: str, decision: str, project_id: str | None, json_output
     error = data.get("error") or ""
     if resolved is True or (resolved is None and result.get("status")):
         verb = "approved" if decision == "approve" else "rejected"
-        console.print(f"[green]Request {request_id} {verb}.[/green]")
+        ok(f"Request {request_id} {verb}.")
         if dispatch.get("dispatched"):
             console.print(f"  [dim]action dispatched:[/] [bold]{dispatch.get('workflow')}[/]")
         elif decision == "approve" and dispatch.get("workflow"):
-            console.print(f"  [red]action dispatch failed:[/] {dispatch.get('error')}")
+            err("action dispatch failed", detail=f"{dispatch.get('error')}")
     else:
-        console.print(f"[red]Could not resolve {request_id}:[/red] {error or 'unknown error'}")
+        err(f"Could not resolve {request_id}", detail=f"{error or 'unknown error'}")
         raise typer.Exit(1)
 
 

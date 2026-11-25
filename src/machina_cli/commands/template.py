@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import err, warn
 
 app = typer.Typer(help="Template management")
 console = Console()
@@ -45,7 +46,7 @@ def list_templates(
     directories = data.get("directories", []) if isinstance(data, dict) else data
 
     if not directories:
-        console.print("[yellow]No templates found.[/yellow]")
+        warn("No templates found.")
         return
 
     # Build a tree from the directory paths
@@ -182,7 +183,7 @@ def install_template(
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
-            console.print(f"[red]Cloud provisioning failed:[/red] {error_msg}")
+            err("Cloud provisioning failed", detail=f"{error_msg}")
             console.print(
                 "\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]"
             )
@@ -237,7 +238,7 @@ def install_template(
                     )
     except Exception as e:
         if not json_output:
-            console.print(f"[yellow]Warning:[/yellow] Local download failed: {e!s}")
+            warn("Warning", detail=f"Local download failed: {e!s}")
 
     # Agent-First Handoff Output
     if json_output:
@@ -291,7 +292,7 @@ def push_template(
                 json.dumps({"status": "error", "message": f"Directory not found: {target_dir}"})
             )
         else:
-            console.print(f"[red]Directory not found: {target_dir}[/red]")
+            err(f"Directory not found: {target_dir}")
         raise typer.Exit(1)
 
     # PRE-FLIGHT LINTER: Validate _install.yml
@@ -367,7 +368,7 @@ def push_template(
         if json_output:
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
-            console.print(f"[red]Deployment failed:[/red] {error_msg}")
+            err("Deployment failed", detail=f"{error_msg}")
         raise typer.Exit(1)
 
     if json_output:

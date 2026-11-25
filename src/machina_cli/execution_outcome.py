@@ -18,6 +18,7 @@ import time
 import httpx
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import err, warn
 
 EXIT_CODES = {"completed": 0, "failed": 1, "partial": 2}
 EXIT_UNKNOWN = 3
@@ -143,8 +144,6 @@ def uncertain(kind: str, json_output: bool):
 
     import typer
 
-    from machina_cli.ui import console
-
     hint = f"machina {kind} executions" if kind == "agent" else "machina execution list"
     message = (
         f"submission may have run — check `{hint}` (or Studio) for a run started just now "
@@ -153,7 +152,7 @@ def uncertain(kind: str, json_output: bool):
     if json_output:
         print(json.dumps({"schema": SCHEMA, "kind": kind, "outcome": "unknown", "error": message}))
     else:
-        console.print(f"  [yellow]Outcome unknown:[/yellow] {message}")
+        warn("Outcome unknown", detail=f"{message}")
     raise typer.Exit(EXIT_UNKNOWN)
 
 
@@ -181,7 +180,7 @@ def poll_failed(kind: str, run_id: str, exc: Exception, json_output: bool):
             )
         )
     else:
-        console.print(f"  [red]{message}[/red]")
+        err(f"{message}")
         console.print(f"  [dim]Check with:[/dim] [bold]{_result_command(kind, run_id)}[/bold]")
     raise typer.Exit(EXIT_UNKNOWN)
 

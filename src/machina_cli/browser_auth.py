@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from rich.console import Console
 
+from machina_cli.theme import err, warn
+
 console = Console(stderr=True)
 
 # Result holder for cross-thread communication
@@ -181,7 +183,7 @@ def browser_login(session_url: str, timeout: int = 120) -> str | None:
 
         if not _auth_result:
             console.print()
-            console.print("  [yellow]Browser authentication timed out.[/yellow]")
+            warn("Browser authentication timed out.")
             console.print()
             console.print("  [dim]This can happen if:[/dim]")
             console.print(
@@ -203,7 +205,7 @@ def browser_login(session_url: str, timeout: int = 120) -> str | None:
             return _auth_result["token"]
         else:
             error = _auth_result.get("error", "Unknown error")
-            console.print(f"  [red]Authentication failed: {error}[/red]")
+            err(f"Authentication failed: {error}")
             console.print()
             console.print(
                 "  [dim]Try:[/dim] [bold]machina login --api-key <key>[/bold] [dim]or[/dim] [bold]machina login --with-credentials[/bold]"

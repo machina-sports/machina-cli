@@ -30,6 +30,7 @@ from machina_cli.config import (
     get_config,
     get_credential,
 )
+from machina_cli.theme import err
 
 console = Console(stderr=True)
 
@@ -155,16 +156,16 @@ class FactoryClient:
                 )
             raise SystemExit(1)
         if response.status_code == 402:
-            console.print(f"[red]{error_msg or 'Insufficient credits for this build.'}[/red]")
+            err(f"{error_msg or 'Insufficient credits for this build.'}")
             raise SystemExit(1)
         if response.status_code == 403:
-            console.print(f"[red]{error_msg or 'Permission denied.'}[/red]")
+            err(f"{error_msg or 'Permission denied.'}")
             raise SystemExit(1)
         if response.status_code == 404:
-            console.print(f"[red]{error_msg or 'Not found.'}[/red]")
+            err(f"{error_msg or 'Not found.'}")
             raise SystemExit(1)
         if response.status_code == 503:
-            console.print(f"[red]{error_msg or 'Factory API not configured / unavailable.'}[/red]")
+            err(f"{error_msg or 'Factory API not configured / unavailable.'}")
             raise SystemExit(1)
         if response.status_code >= 400:
             console.print(
@@ -185,7 +186,7 @@ class FactoryClient:
                 )
                 return self._handle_response(resp)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Factory at {self.base_url}[/red]")
+            err(f"Cannot reach Factory at {self.base_url}")
             raise SystemExit(1)
 
     def post(self, path: str, json_data: dict | None = None) -> dict:
@@ -197,7 +198,7 @@ class FactoryClient:
                 )
                 return self._handle_response(resp)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Factory at {self.base_url}[/red]")
+            err(f"Cannot reach Factory at {self.base_url}")
             raise SystemExit(1)
 
     def stream(self, path: str, params: dict | None = None) -> Iterator[dict]:
@@ -229,5 +230,5 @@ class FactoryClient:
                         except Exception:
                             yield {"raw": payload}
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Factory at {self.base_url}[/red]")
+            err(f"Cannot reach Factory at {self.base_url}")
             raise SystemExit(1)

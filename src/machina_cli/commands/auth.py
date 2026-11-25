@@ -13,6 +13,7 @@ from machina_cli.config import (
     resolve_auth_token,
     store_credential,
 )
+from machina_cli.theme import err, fix, ok, warn
 
 app = typer.Typer(help="Authentication commands")
 console = Console()
@@ -25,7 +26,7 @@ def _handle_mfa_challenge(client: "MachinaClient", data: dict) -> str | None:
     challenge_token = data.get("mfa_challenge_token", "")
     methods = data.get("mfa_methods", [])
 
-    console.print("[yellow]Two-factor authentication required.[/yellow]")
+    warn("Two-factor authentication required.")
     console.print(f"Available methods: {', '.join(methods)}")
 
     # Determine method
@@ -67,7 +68,7 @@ def do_login(
     # Mode 1: API key
     if api_key:
         store_credential("api_key", api_key)
-        console.print("[green]API key stored.[/green]")
+        ok("API key stored.")
 
         # Best-effort identity. CRITICAL: allow_fallback=False so a 5xx never swaps in
         # the session token (which would report the wrong identity), and the key is
@@ -126,11 +127,11 @@ def do_login(
             token = data.get("token")
 
         if not token:
-            console.print("[red]Login failed: no token received.[/red]")
+            err("Login failed: no token received.")
             raise typer.Exit(1)
 
         store_credential("session_token", token)
-        console.print("[green]Login successful.[/green]")
+        ok("Login successful.")
         return
 
     # Mode 2: Browser-based Clerk auth (default)
@@ -141,7 +142,7 @@ def do_login(
     token = browser_login(session_url)
     if token:
         store_credential("session_token", token)
-        console.print("[green]Login successful.[/green]")
+        ok("Login successful.")
 
         # Try to show who logged in
         client = MachinaClient()
@@ -187,7 +188,7 @@ def login(
 def logout():
     """Clear stored credentials and optionally clear browser session."""
     clear_credentials()
-    console.print("[green]Local credentials cleared.[/green]")
+    ok("Local credentials cleared.")
 
     # Open browser logout to clear session cookies (Clerk + machina session)
     session_url = get_config("session_url") or "https://session.machina.gg"
@@ -195,7 +196,7 @@ def logout():
 
     console.print("[dim]Opening browser to clear session cookies...[/dim]")
     webbrowser.open(f"{session_url}/logout")
-    console.print("[green]Logged out completely.[/green]")
+    ok("Logged out completely.")
 
 
 @app.command("clear-session")
@@ -206,7 +207,7 @@ def clear_session():
     """
     # Clear all stored credentials
     clear_credentials()
-    console.print("[green]All local credentials cleared.[/green]")
+    ok("All local credentials cleared.")
 
     # Open browser to clear session cookies on the SESSION app
     session_url = get_config("session_url") or "https://session.machina.gg"
@@ -232,7 +233,8 @@ def whoami(
         if json_output:
             print(json.dumps({"authenticated": False, "error": "not authenticated"}))
         else:
-            console.print("[yellow]Not authenticated. Run `machina login` first.[/yellow]")
+            warn("Not authenticated.")
+            fix("sign in with", "machina login")
         raise typer.Exit(1)
 
     client = MachinaClient()

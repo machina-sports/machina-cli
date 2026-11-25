@@ -5,6 +5,7 @@ import typer
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
+from machina_cli.theme import err, ok, warn
 from machina_cli.ui import (
     ACCENT,
     cell,
@@ -98,7 +99,7 @@ def create(
     )
 
     org_id = result.get("data", {}).get("id", "")
-    console.print(f"[green]Organization created:[/green] {name} (ID: {org_id})")
+    ok("Organization created", detail=f"{name} (ID: {org_id})")
 
     # Set as default if no default exists
     if not get_config("default_organization_id"):
@@ -248,7 +249,7 @@ def usage(
             year, mon = (int(part) for part in str(month).split("-"))
             first = datetime(year, mon, 1, tzinfo=timezone.utc)
         except (ValueError, TypeError):
-            console.print("[red]--month must be YYYY-MM (e.g. 2026-06).[/red]")
+            err("--month must be YYYY-MM (e.g. 2026-06).")
             raise typer.Exit(1)
         last_day = _calendar.monthrange(year, mon)[1]
         start_date = first.strftime("%Y-%m-%d")
@@ -377,7 +378,7 @@ def usage(
         return
 
     if grand_total == 0:
-        console.print(f"[yellow]No token usage in {window_label} for {scope} {scope_id}.[/yellow]")
+        warn(f"No token usage in {window_label} for {scope} {scope_id}.")
         return
 
     prompt_pct = grand_prompt / grand_total * 100 if grand_total else 0

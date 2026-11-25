@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.text import Text
 
 from machina_cli import __version__
+from machina_cli.theme import err, ok, warn
 from machina_cli.versioning import is_newer
 
 console = Console()
@@ -99,13 +100,13 @@ def _update_python_package(version: str, force: bool) -> bool:
     result = subprocess.run(command, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
-        console.print("  [red]Python package update failed.[/red]")
+        err("Python package update failed.")
         if detail:
             console.print(Text(f"  {detail[-1]}", style="dim"))
         console.print("  [dim]If installed with pipx, try:[/dim] pipx upgrade machina-cli")
         return False
 
-    console.print(f"  [green]Updated to v{version}[/green]")
+    ok(f"Updated to v{version}")
     console.print("  [dim]Restart the CLI to use the new version.[/dim]")
     return True
 
@@ -120,7 +121,7 @@ def _binary_target() -> Path:
 def _update_binary(version: str) -> bool:
     plat = _detect_platform()
     if not plat:
-        console.print("  [yellow]Unsupported binary platform. Update manually:[/yellow]")
+        warn("Unsupported binary platform. Update manually:")
         console.print(f"    curl -fsSL {INSTALL_SCRIPT} | bash")
         return False
 
@@ -133,14 +134,14 @@ def _update_binary(version: str) -> bool:
         with httpx.Client(timeout=60, follow_redirects=True) as client:
             response = client.get(asset_url)
         if response.status_code == 404:
-            console.print(f"  [red]Binary not found for {plat}.[/red]")
+            err(f"Binary not found for {plat}.")
             console.print(f"  [dim]Try manually:[/dim] curl -fsSL {INSTALL_SCRIPT} | bash")
             return False
         if response.status_code != 200:
-            console.print(f"  [red]Download failed (HTTP {response.status_code}).[/red]")
+            err(f"Download failed (HTTP {response.status_code}).")
             return False
         if len(response.content) < 1024:
-            console.print("  [red]Downloaded asset is unexpectedly small; update aborted.[/red]")
+            err("Downloaded asset is unexpectedly small; update aborted.")
             return False
 
         with tempfile.NamedTemporaryFile(delete=False, prefix="machina-update-") as temporary:
@@ -159,11 +160,11 @@ def _update_binary(version: str) -> bool:
                 text=True,
             )
             if result.returncode != 0:
-                console.print(f"  [red]Failed: {result.stderr.strip()}[/red]")
+                err(f"Failed: {result.stderr.strip()}")
                 return False
         temporary_path = None
 
-        console.print(f"  [green]Updated to v{version}[/green]")
+        ok(f"Updated to v{version}")
         console.print(f"  [dim]Installed to {target}[/dim]")
         return True
     except Exception as error:
@@ -205,17 +206,17 @@ def do_update(force: bool = False, check: bool = False) -> bool:
             )
             console.print("  [dim]Run[/dim] [bold]machina update[/bold] [dim]to install it.[/dim]")
         elif same_version:
-            console.print("  [green]Already up to date.[/green]")
+            ok("Already up to date.")
         else:
-            console.print("  [green]This build is newer than the latest published release.[/green]")
+            ok("This build is newer than the latest published release.")
         return False
 
     if not update_available and not (force and same_version):
         console.print()
         if same_version:
-            console.print("  [green]Already up to date.[/green]")
+            ok("Already up to date.")
         else:
-            console.print("  [green]This build is newer than the latest published release.[/green]")
+            ok("This build is newer than the latest published release.")
         return False
 
     # Show what's new from the GitHub release notes

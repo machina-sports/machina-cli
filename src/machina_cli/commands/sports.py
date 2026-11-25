@@ -14,6 +14,8 @@ from collections.abc import Iterable
 
 import typer
 
+from machina_cli.catalog import PANEL_BY_COMMAND
+
 
 def _invoke_sports_skills(argv: Iterable[str]) -> int:
     """Call ``sports_skills.cli.main`` with a fabricated argv.
@@ -102,7 +104,7 @@ def register(app: typer.Typer) -> None:
         ),
         # Prevent Typer from rendering a rich help page that would hide the
         # sports-skills help output.
-        rich_help_panel="Operations",
+        rich_help_panel=PANEL_BY_COMMAND["sports"],
     )
     def sports(ctx: typer.Context) -> None:
         code = _invoke_sports_skills(ctx.args)

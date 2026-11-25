@@ -8,13 +8,18 @@ import os
 import readline
 import shlex
 
-from rich.console import Console
 from rich.text import Text
 
-from machina_cli.catalog import REPL_COMMANDS, SUB_COMMANDS, print_command_catalog
+from machina_cli import theme
+from machina_cli.catalog import (
+    REPL_COMMANDS,
+    REPL_EXTRA_COMMANDS,
+    SUB_COMMANDS,
+    print_command_catalog,
+)
 from machina_cli.config import get_config, resolve_auth_token
 
-console = Console(highlight=False)
+console = theme.console
 
 # Dynamic passthroughs and less-common commands are kept out of the compact
 # catalog, but remain discoverable through tab completion.
@@ -94,6 +99,11 @@ def _completer(text, state):
     return options[state] if state < len(options) else None
 
 
+# The mark in the brand orange. readline counts these bytes unless they are
+# wrapped in \001/\002, which is what keeps long lines from wrapping wrong.
+STAR = "\001\033[1;38;2;255;92;31m\002✦\001\033[0m\002"
+
+
 def _build_prompt() -> str:
     """Build the REPL prompt string with context."""
     org_name = get_config("default_organization_name") or ""
@@ -101,7 +111,7 @@ def _build_prompt() -> str:
 
     _, token = resolve_auth_token()
     if not token:
-        return "\033[91m✦\033[0m \033[2m(not authenticated)\033[0m > "
+        return f"{STAR} \033[2m(not authenticated)\033[0m > "
 
     if org_name and proj_name:
         context = f"{org_name}/{proj_name}"
@@ -112,21 +122,23 @@ def _build_prompt() -> str:
     else:
         context = "machina"
 
-    return f"\033[91m✦\033[0m \033[1m{context}\033[0m > "
+    return f"{STAR} \033[1m{context}\033[0m \033[38;5;239m>\033[0m "
 
 
 def _show_repl_banner():
-    """Show the REPL welcome banner."""
-    from machina_cli import __version__
+    """Show the REPL welcome banner: the mark, then where you are."""
+    from machina_cli import __version__, brand
 
     console.print()
+    console.print(brand.lockup(console.width or 100))
+    console.print()
 
-    title = Text()
-    title.append("✦ ", style="bold #FF5C1F")
-    title.append("Machina CLI", style="bold")
-    title.append(f" v{__version__}", style="dim")
-    console.print("  ", end="")
-    console.print(title)
+    meta = Text("  ")
+    meta.append("AI Agent Platform", style=theme.MUTED)
+    meta.append("   ")
+    meta.append(f"v{__version__}", style=theme.INK)
+    console.print(meta)
+    console.print()
 
     _, token = resolve_auth_token()
     if token:
@@ -134,23 +146,28 @@ def _show_repl_banner():
             get_config("default_organization_name") or get_config("default_organization_id") or ""
         )
         proj_name = get_config("default_project_name") or get_config("default_project_id") or ""
+        pairs = []
         if org_name:
-            console.print(f"  [dim]Organization:[/dim] [bold]{org_name}[/bold]")
+            pairs.append(("org", Text(org_name, style="bold")))
         if proj_name:
-            console.print(f"  [dim]Project:[/dim]      [bold]{proj_name}[/bold]")
+            pairs.append(("project", Text(proj_name, style="bold")))
+        if pairs:
+            console.print(theme.kv(pairs))
+            console.print()
     else:
-        console.print("  [yellow]Not authenticated. Type `auth login` to get started.[/yellow]")
+        theme.warn("Not authenticated.")
+        theme.fix("sign in with", "login")
+        console.print()
 
-    console.print()
-    console.print("  [dim]Type a command (e.g. `workflow list`) or `help` for commands.[/dim]")
-    console.print("  [dim]Press Ctrl+D or type `exit` to quit.[/dim]")
+    theme.hint("Type a command (e.g. `workflow list`), or `help` for the catalog.")
+    console.print(Text("   Ctrl+D or `exit` to quit.", style=theme.DIM))
     console.print()
 
 
 def _show_help():
-    """Show REPL help."""
+    """Show REPL help -- the same catalog `machina --help` prints."""
     console.print()
-    print_command_catalog(console)
+    print_command_catalog(console, extra=REPL_EXTRA_COMMANDS)
     console.print()
 
 
@@ -159,7 +176,7 @@ def _dispatch(line: str):
     try:
         args = shlex.split(line)
     except ValueError as e:
-        console.print(f"  [red]Parse error: {e}[/red]")
+        theme.err("Could not parse that line.", detail=str(e))
         return
 
     if not args:
@@ -256,7 +273,7 @@ def _dispatch(line: str):
         # Swallow SystemExit so it doesn't kill the REPL
         pass
     except Exception as e:
-        console.print(f"  [red]Error: {e}[/red]")
+        theme.err(str(e))
 
 
 def start_repl():
@@ -292,7 +309,7 @@ def start_repl():
                 continue
     except EOFError:
         console.print()
-        console.print("  [dim]Goodbye.[/dim]")
+        console.print(Text("  Goodbye.", style=theme.DIM))
         console.print()
     finally:
         try:

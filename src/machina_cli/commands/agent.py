@@ -8,6 +8,7 @@ from rich.tree import Tree
 
 from machina_cli import config_resources, execution_outcome
 from machina_cli.project_client import ProjectAPIError, ProjectClient
+from machina_cli.theme import warn
 from machina_cli.ui import (
     bool_cell,
     cell,
@@ -97,7 +98,7 @@ def get_agent(
 
     agent = data if isinstance(data, dict) else {}
     if not agent:
-        console.print("[yellow]Agent not found.[/yellow]")
+        warn("Agent not found.")
         return
 
     # Status colors
@@ -381,7 +382,7 @@ def create_agent(
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """Create a agent from a JSON file and print the persisted record."""
+    """Create an agent from a JSON file and print the persisted record."""
     config_resources.create("agent", file, project_id, json_output)
 
 
@@ -392,7 +393,7 @@ def update_agent(
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """Update a agent's configuration; omitted fields are kept.
+    """Update an agent's configuration; omitted fields are kept.
 
     Never changes status/scheduling: a file that would change status, scheduled,
     processing or last_execution is refused (activation is a separate operation).
@@ -407,5 +408,5 @@ def delete_agent(
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
-    """Delete a agent (asks for confirmation unless --yes)."""
+    """Delete an agent (asks for confirmation unless --yes)."""
     config_resources.delete("agent", ref, project_id, json_output, yes)

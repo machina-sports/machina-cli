@@ -19,6 +19,7 @@ import typer
 from rich.panel import Panel
 
 from machina_cli.factory_client import FactoryClient
+from machina_cli.theme import err, warn
 from machina_cli.ui import cell, console, datetime_cell, make_table, status_cell
 
 app = typer.Typer(help="Trigger Factory coding-agent jobs")
@@ -183,7 +184,7 @@ def logs(
         elif kind == "status":
             preview = ev.get("preview", "")
             if preview == "error":
-                console.print("  [red]Build reported an error.[/red]")
+                err("Build reported an error.")
         elif kind == "done":
             console.print("  [dim]— stream closed —[/dim]")
             break
@@ -224,7 +225,7 @@ def cancel(
     client = FactoryClient(project_id)
     result = client.post(f"/c/api/projects/{job_id}/cancel")
     status_val = result.get("status", "cancelled")
-    console.print(f"  [yellow]Job {job_id} → {status_val}[/yellow]")
+    warn(f"Job {job_id} → {status_val}")
 
 
 @app.command("open-pr")
@@ -247,7 +248,7 @@ def open_pr(
             )
         )
     else:
-        console.print(f"  [yellow]No PR available yet for {job_id}.[/yellow]")
+        warn(f"No PR available yet for {job_id}.")
 
 
 @app.command("list")
@@ -265,7 +266,7 @@ def list_jobs(
         return
 
     if not active and not recent:
-        console.print("[yellow]No Factory builds yet.[/yellow]")
+        warn("No Factory builds yet.")
         return
 
     if active:
@@ -410,4 +411,4 @@ def _watch(client: FactoryClient, job_id: str, timeout: int = 1800):
         except SystemExit:
             pass
     elif elapsed >= timeout:
-        console.print("  [yellow]Timed out watching. The build may still be running.[/yellow]")
+        warn("Timed out watching. The build may still be running.")
