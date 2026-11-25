@@ -8,6 +8,7 @@ from rich.tree import Tree
 
 from machina_cli import config_resources, execution_outcome
 from machina_cli.project_client import ProjectAPIError, ProjectClient
+from machina_cli.theme import warn
 from machina_cli.ui import (
     bool_cell,
     cell,
@@ -21,7 +22,6 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
-from machina_cli.theme import warn
 
 app = typer.Typer(help="Agent management")
 

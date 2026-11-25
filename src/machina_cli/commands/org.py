@@ -5,6 +5,7 @@ import typer
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
+from machina_cli.theme import err, ok, warn
 from machina_cli.ui import (
     ACCENT,
     cell,
@@ -17,7 +18,6 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
-from machina_cli.theme import err, ok, warn
 
 app = typer.Typer(help="Organization management")
 

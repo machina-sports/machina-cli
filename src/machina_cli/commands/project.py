@@ -4,6 +4,7 @@ import typer
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
+from machina_cli.theme import ok
 from machina_cli.ui import (
     ACCENT,
     cell,
@@ -18,7 +19,6 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
-from machina_cli.theme import ok
 
 app = typer.Typer(help="Project management")
 

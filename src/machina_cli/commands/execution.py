@@ -6,6 +6,7 @@ from rich.syntax import Syntax
 
 from machina_cli.execution_outcome import agent_outcome, get_workflow_run, workflow_outcome
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import warn
 from machina_cli.ui import (
     cell,
     console,
@@ -17,7 +18,6 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
-from machina_cli.theme import warn
 
 app = typer.Typer(help="Execution management")
 

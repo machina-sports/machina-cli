@@ -68,7 +68,7 @@ class MachinaGroup(TyperGroup):
     is where the actions and flags belong.
     """
 
-    def format_help(self, ctx, formatter):  # noqa: ARG002 - Click's signature
+    def format_help(self, ctx, formatter):
         show_banner()
 
 

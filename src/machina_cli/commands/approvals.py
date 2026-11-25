@@ -13,6 +13,7 @@ import json as json_lib
 import typer
 
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import err, ok
 from machina_cli.ui import (
     cell,
     console,
@@ -25,7 +26,6 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
-from machina_cli.theme import err, ok
 
 app = typer.Typer(help="Human approvals (list / approve / reject workflow checkpoints)")
 

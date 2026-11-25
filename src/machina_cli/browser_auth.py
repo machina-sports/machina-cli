@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from rich.console import Console
+
 from machina_cli.theme import err, warn
 
 console = Console(stderr=True)

@@ -26,8 +26,8 @@ from pathlib import Path
 import typer
 
 from machina_cli.project_client import ProjectAPIError, ProjectClient
-from machina_cli.ui import console
 from machina_cli.theme import err, ok
+from machina_cli.ui import console
 
 SCHEMA = "machina.config/v1"
 

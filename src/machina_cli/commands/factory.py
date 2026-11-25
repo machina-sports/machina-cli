@@ -19,8 +19,8 @@ import typer
 from rich.panel import Panel
 
 from machina_cli.factory_client import FactoryClient
-from machina_cli.ui import cell, console, datetime_cell, make_table, status_cell
 from machina_cli.theme import err, warn
+from machina_cli.ui import cell, console, datetime_cell, make_table, status_cell
 
 app = typer.Typer(help="Trigger Factory coding-agent jobs")
 

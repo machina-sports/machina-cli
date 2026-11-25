@@ -16,8 +16,8 @@ import typer
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
 from machina_cli.project_client import ProjectClient
-from machina_cli.ui import cell, console, emit_json, extract_collection, make_table
 from machina_cli.theme import warn
+from machina_cli.ui import cell, console, emit_json, extract_collection, make_table
 
 app = typer.Typer(help="Context Graph — self-healing status")
 

@@ -4,7 +4,6 @@ import json
 import re
 
 import typer
-
 from rich.text import Text
 
 from machina_cli.config import get_config, load_config, set_config

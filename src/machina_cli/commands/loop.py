@@ -13,8 +13,8 @@ import time
 import typer
 
 from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
-from machina_cli.ui import cell, console, emit_json, empty_state, make_table, status_cell
 from machina_cli.theme import ok
+from machina_cli.ui import cell, console, emit_json, empty_state, make_table, status_cell
 
 app = typer.Typer(help="Durable agentic turn loop (harness)")
 

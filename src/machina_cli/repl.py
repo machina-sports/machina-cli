@@ -11,7 +11,6 @@ import shlex
 from rich.text import Text
 
 from machina_cli import theme
-
 from machina_cli.catalog import (
     REPL_COMMANDS,
     REPL_EXTRA_COMMANDS,

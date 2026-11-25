@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import httpx
 import typer
 from rich.console import Console
+
 from machina_cli.theme import err, ok
 
 app = typer.Typer(help="Create projects from official Machina starters")

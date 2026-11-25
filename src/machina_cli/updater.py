@@ -15,8 +15,8 @@ from rich.console import Console
 from rich.text import Text
 
 from machina_cli import __version__
-from machina_cli.versioning import is_newer
 from machina_cli.theme import err, ok, warn
+from machina_cli.versioning import is_newer
 
 console = Console()
 

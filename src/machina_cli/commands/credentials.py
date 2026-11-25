@@ -6,6 +6,7 @@ import typer
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
+from machina_cli.theme import err, fix, ok
 from machina_cli.ui import (
     cell,
     console,
@@ -15,7 +16,6 @@ from machina_cli.ui import (
     render_pagination,
     validate_pagination,
 )
-from machina_cli.theme import err, fix, ok
 
 app = typer.Typer(help="API key management")
 
