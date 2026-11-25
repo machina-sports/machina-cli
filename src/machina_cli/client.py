@@ -4,7 +4,7 @@ import httpx
 from rich.console import Console
 
 from machina_cli.config import get_api_url, get_credential, resolve_auth_token
-from machina_cli.theme import err, fix
+from machina_cli.theme import err, fix, warn
 
 console = Console(stderr=True)
 
@@ -42,26 +42,32 @@ class MachinaClient:
             if isinstance(error, dict):
                 error_msg = error.get("message", "")
 
-        def emit(*args):
-            if not quiet:
-                console.print(*args)
+        def emit(message: str, *, remedy: tuple[str, str] | None = None):
+            """Report one API failure, unless the caller asked for quiet."""
+            if quiet:
+                return
+            err(message)
+            if remedy:
+                fix(*remedy)
 
         if response.status_code == 401:
-            emit(f"[red]{error_msg or 'Session expired.'}[/red]")
-            emit("[yellow]Run `machina login` to re-authenticate.[/yellow]")
+            emit(
+                error_msg or "Session expired.",
+                remedy=("sign in again with", "machina login"),
+            )
             raise SystemExit(1)
         if response.status_code == 403:
-            emit(f"[red]{error_msg or 'Permission denied.'}[/red]")
+            emit(error_msg or "Permission denied.")
             raise SystemExit(1)
         if response.status_code == 404:
-            emit(f"[red]{error_msg or 'Resource not found.'}[/red]")
+            emit(error_msg or "Resource not found.")
             raise SystemExit(1)
         if response.status_code >= 500:
-            emit(f"[red]{error_msg or 'Server error. Try again later.'}[/red]")
+            emit(error_msg or "Server error. Try again later.")
             raise SystemExit(1)
 
         if isinstance(data, dict) and data.get("status") == "error":
-            emit(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
+            emit(error_msg or "Unknown error.")
             raise SystemExit(1)
 
         return data
@@ -90,18 +96,16 @@ class MachinaClient:
                         retry = getattr(client, method)(url, headers=retry_headers, **kwargs)
                         if retry.status_code < 500:
                             if not quiet:
-                                console.print(
-                                    "[yellow]API key not accepted by the server here; "
-                                    "used your session token for this request.[/yellow]"
+                                warn(
+                                    "API key not accepted by the server here.",
+                                    detail="used your session token for this request",
                                 )
                             response = retry
 
                 return self._handle_response(response, quiet=quiet)
         except httpx.ConnectError:
             if not quiet:
-                console.print(
-                    f"[red]Cannot reach Machina API at {self.api_url}. Check your connection.[/red]"
-                )
+                err(f"Cannot reach Machina API at {self.api_url}. Check your connection.")
             raise SystemExit(1)
 
     def get(

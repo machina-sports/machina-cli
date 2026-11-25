@@ -14,7 +14,7 @@ import httpx
 import typer
 from rich.console import Console
 
-from machina_cli.theme import err, ok
+from machina_cli.theme import err, ok, warn
 
 app = typer.Typer(help="Create projects from official Machina starters")
 console = Console()
@@ -168,9 +168,7 @@ def create_ai_app(
     console.print()
     ok(f"Created {name}", detail=str(destination))
     if not no_git and not git_initialized:
-        console.print(
-            "[yellow]Git was not initialized; run `git init` when Git is available.[/yellow]"
-        )
+        warn("Git was not initialized; run `git init` when Git is available.")
     console.print("\nNext steps:")
     console.print(f"  cd {destination}")
     console.print("  cp .env.example .env.local")

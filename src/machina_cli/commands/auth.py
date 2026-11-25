@@ -101,11 +101,11 @@ def do_login(
         if label:
             console.print(f"Authenticated as [bold]{label}[/bold]")
         else:
-            console.print(
-                "[yellow]Key stored, but the server didn't confirm it (the auth endpoints "
-                "may not accept API keys, or returned an error). The key is kept — run a "
-                "command to use it, or set the MACHINA_API_KEY env var.[/yellow]"
+            warn(
+                "Key stored, but the server did not confirm it.",
+                detail="the auth endpoints may not accept API keys, or returned an error",
             )
+            fix("the key is kept — try it with", "machina whoami")
         return
 
     # Mode 3: Username/password (explicit flag)
@@ -174,10 +174,13 @@ def login(
         None, "--password", "-p", help="Password (requires --with-credentials)"
     ),
 ):
-    """Login to the Machina platform.
+    """Log in and return to your shell.
 
     Default: opens browser for Clerk authentication (magic link / SSO).
     Use --api-key for CI/CD, or --with-credentials for username/password.
+
+    Same implementation and same flags as `machina login`; that one opens the
+    interactive session afterwards, this one does not. Prefer this in scripts.
     """
     do_login(
         api_key=api_key, username=username, password=password, with_credentials=with_credentials

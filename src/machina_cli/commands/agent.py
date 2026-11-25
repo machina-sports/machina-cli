@@ -218,9 +218,7 @@ def run_agent(
                     value = int(value)
                 context_agent[key] = value
             else:
-                console.print(
-                    f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]"
-                )
+                warn(f"Ignoring invalid param '{param}' (expected key=value)")
 
     # Interactive mode: if no params and there are available inputs, show them
     if not params and available_inputs and sys.stdin.isatty():

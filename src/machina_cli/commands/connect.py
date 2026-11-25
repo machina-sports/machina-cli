@@ -19,6 +19,7 @@ from machina_cli.commands.credentials import _mask_key
 from machina_cli.commands.mcp import connection_payload, probe_or_fail, resolve_base_url
 from machina_cli.config import get_config, resolve_auth_token
 from machina_cli.mcp_session import MCPConnectError
+from machina_cli.theme import fix, warn
 
 console = Console()
 
@@ -156,11 +157,9 @@ def run(
     # sportsclaw injects --token as X-Api-Token; a session token may expire and
     # may not validate there. Nudge toward a durable project API key.
     if header_name != "X-Api-Token":
-        console.print(
-            "\n[yellow]Note:[/yellow] this is a session token (expires). For a durable "
-            "connection re-run with [bold]--mint[/bold] to use a dedicated project API key "
-            "(or set [bold]MACHINA_API_KEY[/bold])."
-        )
+        console.print()
+        warn("This is a session token.", detail="it expires")
+        fix("for a durable connection re-run with", "--mint")
 
     console.print("\n[dim]Register with sportsclaw:[/dim]")
     console.print(

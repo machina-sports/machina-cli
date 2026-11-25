@@ -243,3 +243,57 @@ def test_last_month_flag_is_a_full_prior_calendar_month():
     assert window["from"].endswith("-01")  # starts on the 1st
     assert window["from"][:7] == window["to"][:7]  # same calendar month
     assert window["label"] != "last 30d"  # not the rolling window
+
+
+# --- charts: the rebrand's sparkline / meter, actually wired in ---------------
+# theme.sparkline and theme.meter shipped in 0.11.0 defined but unused. These
+# pin them to the surface that has the data, so they cannot drift back into
+# dead code.
+
+
+def test_usage_draws_a_sparkline_over_the_window():
+    """Two or more days of data render the trend line above the breakdown."""
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1"])
+
+    assert result.exit_code == 0, result.output
+    # _USAGE carries two distinct days, so the series has two block glyphs.
+    assert any(ch in result.output for ch in "▁▂▃▄▅▆▇█"), result.output
+    assert "peak" in result.output
+
+
+def test_usage_renders_a_bar_per_day_against_the_window_peak():
+    """Each day gets a bar scaled to the busiest day, so the shape is scannable.
+
+    This fixture has a single project (every export row is pid p1), so the
+    by-project table is correctly suppressed -- the by-day bars are what it
+    exercises.
+    """
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1"])
+
+    assert result.exit_code == 0, result.output
+    assert "By day" in result.output
+    # meter() draws with full/half/empty blocks; the peak day is a full bar.
+    assert "█" in result.output, result.output
+    assert any(ch in result.output for ch in "▓░"), result.output
+
+
+def test_usage_json_carries_no_chart_glyphs():
+    """--json stays a data contract: no block drawing characters leak into it."""
+    with (
+        patch("machina_cli.commands.org.get_config", return_value=None),
+        patch("machina_cli.commands.org.MachinaClient", _client(projects=_PROJECTS)),
+    ):
+        result = runner.invoke(app, ["org", "usage", "--org", "org_1", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "by_day" in payload
+    assert not any(ch in result.stdout for ch in "▁▂▃▄▅▆▇█▓░")

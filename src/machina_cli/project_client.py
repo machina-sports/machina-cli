@@ -23,7 +23,7 @@ from machina_cli.config import (
     resolve_auth_token,
     store_credential,
 )
-from machina_cli.theme import err, fix
+from machina_cli.theme import err, fix, warn
 
 console = Console(stderr=True)
 
@@ -245,8 +245,8 @@ class ProjectClient:
             _project_cache.pop(_cache_key(self.project_id), None)
             _clear_credential(f"project_token_{self.project_id}")
             err(f"{error_msg or 'Project session expired.'}")
-            console.print(
-                "[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]"
+            warn(
+                "Run the command again to re-authenticate, or `machina login` to refresh your session."
             )
             raise ProjectAPIError(error_msg or "project session expired", status, details)
         if status >= 400:

@@ -54,9 +54,7 @@ def _parse_repo(repo: str | None) -> dict | None:
     if not repo:
         return None
     if "/" not in repo:
-        console.print(
-            f"[red]Invalid --repo '{repo}'. Use owner/name (e.g. machina-sports/sports-skills).[/red]"
-        )
+        err(f"Invalid --repo '{repo}'. Use owner/name (e.g. machina-sports/sports-skills).")
         raise SystemExit(1)
     owner, name = repo.split("/", 1)
     return {"owner": owner.strip(), "repo": name.strip()}
@@ -77,9 +75,7 @@ def run(
 ):
     """Kick off a new Factory build from a prompt."""
     if mode and mode not in VALID_MODES:
-        console.print(
-            f"[red]Invalid --mode '{mode}'. Choose one of: {', '.join(VALID_MODES)}.[/red]"
-        )
+        err(f"Invalid --mode '{mode}'. Choose one of", detail=f"{', '.join(VALID_MODES)}.")
         raise SystemExit(1)
 
     client = FactoryClient(project_id)
@@ -317,7 +313,8 @@ def whoami(
     # Recognized if Factory returned a uid (session) or an org (api-key).
     if not me.get("uid") and not me.get("organization"):
         console.print(
-            "[yellow]Factory does not recognize you.[/yellow] Run [bold]machina login[/bold] (or set a valid project API key)."
+            "Factory does not recognize you.",
+            detail="run `machina login`, or set a valid project API key",
         )
         return
 

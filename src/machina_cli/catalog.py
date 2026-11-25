@@ -37,6 +37,9 @@ class CommandSpec:
     description: str
     primary: tuple[str, ...] = ()
     usage: str | None = None
+    #: Still registered and still working, but kept out of the printed catalog.
+    #: It stays in ALL_COMMANDS so tab completion and the sync test still see it.
+    deprecated: str | None = None
 
     @property
     def shown(self) -> str:
@@ -58,11 +61,11 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[CommandSpec, ...]], ...] = (
         "Session",
         "where you are",
         (
-            CommandSpec("login", (), "Authenticate in the browser", usage="--api-key"),
+            CommandSpec("login", (), "Log in and open a session", usage="--api-key"),
             CommandSpec(
                 "auth",
                 ("login", "logout", "whoami", "clear-session"),
-                "Identity and sign-out",
+                "Log in without a session, and sign out",
                 primary=("login", "logout", "whoami"),
             ),
             CommandSpec(
@@ -155,7 +158,12 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[CommandSpec, ...]], ...] = (
                 "Install, run and publish skills",
                 primary=("list", "install", "run", "push"),
             ),
-            CommandSpec("template", ("list", "install", "push"), "Legacy alias for skills"),
+            CommandSpec(
+                "template",
+                ("list", "install", "push"),
+                "Legacy alias for skills",
+                deprecated="machina skills",
+            ),
         ),
     ),
     (
@@ -168,7 +176,7 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[CommandSpec, ...]], ...] = (
                 "Wire an agent to a project's MCP",
                 usage="[project] --mint --probe",
             ),
-            CommandSpec("mcp", ("url", "tools"), "Inspect an MCP endpoint"),
+            CommandSpec("mcp", ("url", "tools"), "Resolve an endpoint; list its tools"),
             CommandSpec("credentials", ("list", "generate", "revoke"), "API keys"),
             CommandSpec("sports", (), "Sports-skills passthrough", usage="<module> <command>"),
         ),
@@ -247,6 +255,7 @@ def command_catalog(
         renderables.append(header)
 
         rows = (*specs, *extra) if group == COMMAND_GROUPS[-1][0] else specs
+        rows = tuple(spec for spec in rows if not spec.deprecated)
         grid = Table.grid(padding=(0, 2))
         grid.add_column(style=f"bold {ACCENT}", width=_CMD_W, no_wrap=True)
         grid.add_column(width=_DESC_W, overflow="ellipsis", no_wrap=True)

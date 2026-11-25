@@ -13,7 +13,7 @@ import time
 import typer
 
 from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
-from machina_cli.theme import ok
+from machina_cli.theme import ok, warn
 from machina_cli.ui import cell, console, emit_json, empty_state, make_table, status_cell
 
 app = typer.Typer(help="Durable agentic turn loop (harness)")
@@ -64,8 +64,9 @@ def _render_verdict(session: dict) -> None:
     # it (Cap 8.2 retry-with-critique) before this verdict.
     repaired = " · self-repaired" if v.get("repaired") else ""
     if session.get("status") == "needs_review":
-        console.print(
-            f"[yellow]⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator: {model}{repaired})[/]"
+        warn(
+            f"⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator",
+            detail=f"{model}{repaired})",
         )
     elif v.get("verdict") == "pass":
         ok(f"✓ verified[/] [dim](evaluator: {model}{repaired})")
