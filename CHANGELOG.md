@@ -2,6 +2,25 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.11.0] - 2026-11-25
+
+A design system for the terminal (#90). The CLI had grown to 24 command groups across four releases; the surface still worked, but it had stopped reading as one product. Nothing is renamed — every command, flag and action keeps the name it had.
+
+### Added
+- **The Machina Sports wordmark, rebuilt.** `brand.py` carries it as a half-block bitmap in three lockups, picked by terminal width (full → wordmark → `✦ MACHINA SPORTS`). The art is baked in as string literals, so there is no font, no rasteriser and no startup cost. The old banner stacked a narrow panel on a full-width one below 110 columns and left a large void; the lockup now follows the terminal instead.
+- **`theme.py` — one definition of what the CLI looks like.** Palette, status glyphs (`✓ ✕ ▲ ⓘ →`), meters, sparklines, section rules and key/value blocks, with ASCII fallbacks behind `MACHINA_ASCII`. `meter()` takes a `ramp`, because the same bar means opposite things in the two places it is drawn: a **usage** bar (quota, tokens, storage) goes red as it fills, a **health** bar (verified edges, pass rate) goes red as it empties. A flat series at zero draws on the floor and dim, so "no activity" never reads as steady mid-level traffic.
+- `--json` on `loop sessions`, `project status` and `version` — the reads that return data. The remaining commands are left deliberately: most are interactive actions (`auth login`), setters (`org use`) or streams (`factory watch`), where a JSON document would be fiction.
+
+### Changed
+- **One help surface.** `machina`, `machina --help` and the REPL's `help` now render the same catalog. They used to carry independent groupings and disagreed about the CLI's shape. Typer orders its help panels by where a command happens to be registered — top-level commands first, then groups — which no reordering can bend into a deliberate order, because no top-level command lives in `Resources`. So the root renders the catalog itself; sub-commands keep Typer's rich help, which is where actions and flags belong.
+- **24 commands regrouped from four groups into six** — Session, Resources, Run & watch, Build, Connect, CLI — following what you are doing rather than what the thing is. "Operations" had become a bucket holding 11 of 24 commands.
+- **The catalog is a map, not a manual.** A command spec carries the complete action list, which drives tab completion and the test that keeps the catalog honest against the registered commands, plus a curated subset for display. Printing all of them is what used to overflow the column and drop the `skills` continuation line into the description column.
+- **Colour is punctuation, not paint.** 104 whole-sentence colour tags became 117 status calls: the glyph carries the colour and the sentence stays default-foreground, so state still reads when output is piped or colour is off. Ten messages that embedded their remedy in prose now show it on its own line (`✕ No project selected.` followed by `→ select one with  machina project use <id>`).
+
+### Fixed
+- **`err`, `warn` and `fix` write to stderr.** `project_client`, `client`, `factory_client` and `browser_auth` already printed there deliberately, so that `--json` stays pipeable; routing them through the new status helpers would otherwise have moved their output to stdout unnoticed.
+- `machina agent --help` no longer reads "Create a agent".
+
 ## [0.10.2] - 2026-11-18
 
 ### Fixed
