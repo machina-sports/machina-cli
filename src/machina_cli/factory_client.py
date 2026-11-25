@@ -30,7 +30,7 @@ from machina_cli.config import (
     get_config,
     get_credential,
 )
-from machina_cli.theme import err
+from machina_cli.theme import err, fix
 
 console = Console(stderr=True)
 
@@ -91,10 +91,8 @@ class FactoryClient:
         self.api_key = _resolve_api_key()
 
         if not (self.session_token or self.api_key):
-            console.print(
-                "[red]Factory requires a studio session.[/red] "
-                "Run [bold]machina login[/bold] (browser) to authenticate."
-            )
+            err("Factory requires a studio session.")
+            fix("authenticate in the browser with", "machina login")
             raise SystemExit(1)
 
         # session mode wins when both are present: it carries the real user
@@ -147,12 +145,11 @@ class FactoryClient:
 
         if response.status_code == 401:
             if self.mode == "session":
-                console.print(
-                    "[red]Studio session expired or invalid.[/red] Run [bold]machina login[/bold] to refresh."
-                )
+                console.print("Studio session expired or invalid.")
             else:
                 console.print(
-                    "[red]API key rejected by Factory.[/red] The customers app may not accept api-key auth yet, or the key is invalid."
+                    "API key rejected by Factory.",
+                    detail="the customers app may not accept api-key auth yet, or the key is invalid",
                 )
             raise SystemExit(1)
         if response.status_code == 402:
@@ -168,9 +165,7 @@ class FactoryClient:
             err(f"{error_msg or 'Factory API not configured / unavailable.'}")
             raise SystemExit(1)
         if response.status_code >= 400:
-            console.print(
-                f"[red]{error_msg or f'Factory error (HTTP {response.status_code}).'}[/red]"
-            )
+            err(f"{error_msg or f'Factory error (HTTP {response.status_code}).'}")
             raise SystemExit(1)
 
         return data if isinstance(data, dict) else {"data": data}

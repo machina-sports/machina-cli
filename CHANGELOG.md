@@ -2,6 +2,24 @@
 
 All notable changes to machina-cli are documented here.
 
+## [0.12.0] - 2026-11-25
+
+Finishes the 0.11.0 rebrand: the chart primitives it shipped are now actually drawn, and the three naming questions it left open are resolved — without renaming anything.
+
+### Added
+- **`machina org usage` draws the window it reports.** A sparkline over the daily totals sits above the breakdown, each project gets a share bar, and each day gets a bar scaled to the window's peak. `theme.sparkline` and `theme.meter` shipped in 0.11.0 defined but called from nowhere; these are the surfaces that have the data, and tests now pin them so they cannot drift back into dead code. `--json` is unchanged and carries no drawing characters.
+- **`machina context-graph status` gains a Health column** — the share of a project's edges that come back clean, on the `health` ramp (an empty bar is the bad one). Staleness is already folded in, so an edge whose evidence has aged out is never counted green.
+
+### Changed
+- **`machina template` is deprecated in favour of `machina skills`.** It keeps working and keeps its flags, but warns and no longer appears in the catalog. The two are not identical: `skills install` bootstraps the constructor skill first, `template install` does not. The *module* is untouched — `skills` calls its functions directly, and only the CLI path warns.
+- **`machina login` and `machina auth login` now take the same flags** (`--api-key`, `--with-credentials`, `--username`, `--password`). They always shared an implementation but had diverged on flags and behaviour; the only difference now is what follows, and both say so: `login` opens the interactive session, `auth login` returns to your shell. `login --no-interactive` gives the `auth login` behaviour and is no longer hidden.
+- **`connect` and `mcp url` are documented as the layers they are**, rather than merged. `mcp url` resolves an endpoint and `mcp tools` lists what it serves; `connect` is built on them and adds the token, server name and optional minted key an agent needs. Collapsing them would have cost `--session` and `--mint` for no gain.
+- **37 more colour paints became status calls.** The 0.11.0 sweep only matched single-line `console.print("[red]…")`; messages whose string sat on its own line, or spanned lines by concatenation, were missed. `client.py`'s API error paths now report through the same vocabulary, with a remedy line on 401.
+
+### Fixed
+- `machina project use` no longer emits a stray `[/yellow]` when clearing a stale `client_api_url`.
+- The by-project, top-agents and by-day tables size to their content instead of stretching to the terminal, which left the label column stranded in whitespace once the bars were added.
+
 ## [0.11.0] - 2026-11-25
 
 A design system for the terminal (#90). The CLI had grown to 24 command groups across four releases; the surface still worked, but it had stopped reading as one product. Nothing is renamed — every command, flag and action keeps the name it had.

@@ -225,7 +225,8 @@ def run_skill(
 
     if not choices:
         console.print(
-            f"[red]No runnable entrypoints found in skill:[/red] {skill.get('name', skill_name)}"
+            "No runnable entrypoints found in skill.",
+            detail=str(skill.get("name", skill_name)),
         )
         raise typer.Exit(1)
 

@@ -16,8 +16,16 @@ import typer
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
 from machina_cli.project_client import ProjectClient
-from machina_cli.theme import warn
-from machina_cli.ui import cell, console, emit_json, extract_collection, make_table
+from machina_cli.theme import err, warn
+from machina_cli.ui import (
+    MUTED,
+    cell,
+    console,
+    emit_json,
+    extract_collection,
+    make_table,
+    meter,
+)
 
 app = typer.Typer(help="Context Graph — self-healing status")
 
@@ -243,9 +251,7 @@ def status(
     if not org:
         pid = project_id or get_config("default_project_id")
         if not pid:
-            console.print(
-                "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
-            )
+            err("No project selected. Run `machina project use <id>` or pass --project.")
             raise typer.Exit(1)
         st = _collect(pid)
         if json_output:
@@ -294,10 +300,26 @@ def status(
     table = make_table("Self-healing across the org", expand=True)
     table.add_column("Project", ratio=3, overflow="ellipsis")
     table.add_column("Edges", justify="right")
+    table.add_column("Health", no_wrap=True)
     table.add_column("Surface", no_wrap=True)
     table.add_column("Beat", no_wrap=True)
     for pname, pid, st in rows:
-        n_edges = str(len(st["edges"]))
+        # Health is the share of this project's edges that come back clean, with
+        # staleness already folded in by _apply_staleness -- an edge whose evidence
+        # has aged out is never counted as green. The ramp runs the other way from
+        # the usage bars: here an empty bar is the bad one.
+        clean = 0
+        for edge, h in st["edges"].items():
+            _, color, _ = _apply_staleness(*_edge_summary(edge, h), h.get("_seen", ""))
+            clean += color == "green"
+        total_edges = len(st["edges"])
+        if total_edges:
+            health = meter(clean / total_edges, size=12, ramp="health")
+            health.append(f" {clean}/{total_edges}", style=MUTED)
+        else:
+            health = cell(None)
+
+        n_edges = str(total_edges)
         s = st["surface"]
         surf = cell(None)
         if s:
@@ -322,7 +344,7 @@ def status(
             )
         else:
             beat_s = cell("none", style="dim")
-        table.add_row(cell(pname, style="bold"), cell(n_edges), surf, beat_s)
+        table.add_row(cell(pname, style="bold"), cell(n_edges), health, surf, beat_s)
     console.print(table)
     if skipped:
         console.print(f"[dim]{skipped} project(s) skipped (unreachable / no access).[/]")
@@ -557,9 +579,7 @@ def timeline(
     else:
         pid = project_id or get_config("default_project_id")
         if not pid:
-            console.print(
-                "[red]No project selected. Run `machina project use <id>` or pass --project.[/red]"
-            )
+            err("No project selected. Run `machina project use <id>` or pass --project.")
             raise typer.Exit(1)
         pname = _project_label(pid)
         for ev in _collect_timeline(pid):

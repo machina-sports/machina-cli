@@ -8,6 +8,7 @@ from rich.panel import Panel
 
 from machina_cli import config_resources, execution_outcome
 from machina_cli.project_client import ProjectAPIError, ProjectClient
+from machina_cli.theme import warn
 from machina_cli.ui import (
     cell,
     console,
@@ -158,9 +159,7 @@ def run_workflow(
                     value = int(value)
                 context[key] = value
             else:
-                console.print(
-                    f"  [yellow]Ignoring invalid param '{param}' (expected key=value)[/yellow]"
-                )
+                warn(f"Ignoring invalid param '{param}' (expected key=value)")
 
     # Interactive mode: if no params and there are available inputs, show them
     if not params and available_inputs and sys.stdin.isatty():

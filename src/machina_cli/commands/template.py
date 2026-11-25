@@ -1,4 +1,16 @@
-"""Template management commands."""
+"""Template commands.
+
+Two things share this name, and only one of them is deprecated.
+
+The *module* is load-bearing: ``machina skills list|install|push`` call
+``list_templates`` / ``install_template`` / ``push_template`` directly, so these
+functions stay.
+
+The *command group* ``machina template`` is the older, rawer path to the same
+three operations -- it skips the constructor-skill bootstrap that ``skills
+install`` does first. It keeps working so existing scripts don't break, but it
+warns and is kept out of the printed catalog. ``machina skills`` is the surface.
+"""
 
 from pathlib import Path
 
@@ -7,10 +19,26 @@ from rich.console import Console
 from rich.tree import Tree
 
 from machina_cli.project_client import ProjectClient
-from machina_cli.theme import err, warn
+from machina_cli.theme import err, fix, warn
 
-app = typer.Typer(help="Template management")
 console = Console()
+
+
+def _deprecation_notice() -> None:
+    """Warn once per `machina template …` invocation, then run the command.
+
+    This is the group's callback rather than a line inside each function, so it
+    fires only for the CLI path. ``skills`` calls the same functions directly as
+    Python and must stay quiet.
+    """
+    warn("`machina template` is deprecated.", detail="same operations, one bootstrap short")
+    fix("use", "machina skills")
+
+
+app = typer.Typer(
+    help="Template management (deprecated — use `machina skills`)",
+    callback=_deprecation_notice,
+)
 
 DEFAULT_REPO = "https://github.com/machina-sports/machina-templates.git/"
 DEFAULT_BRANCH = "main"
@@ -154,7 +182,7 @@ def install_template(
         gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if private and not gh_token:
         console.print(
-            "[red]--private was set but no GitHub token is available.[/red] "
+            "--private was set but no GitHub token is available. "
             "Pass --gh-token, or export GH_TOKEN / GITHUB_TOKEN.",
         )
         raise typer.Exit(1)
@@ -184,9 +212,7 @@ def install_template(
             console.print_json(json.dumps({"status": "error", "message": error_msg}))
         else:
             err("Cloud provisioning failed", detail=f"{error_msg}")
-            console.print(
-                "\n[yellow]Verify `machina login` tokens are valid and the template path exists.[/yellow]"
-            )
+            warn("Verify `machina login` tokens are valid and the template path exists.")
         raise typer.Exit(1)
 
     if not json_output:
@@ -343,8 +369,8 @@ def push_template(
             raise typer.Exit(1)
     else:
         if not json_output:
-            console.print(
-                "[yellow]Warning: No _install.yml found in the template folder. Continuing push...[/yellow]"
+            warn(
+                "Warning", detail="No _install.yml found in the template folder. Continuing push..."
             )
 
     if not json_output:

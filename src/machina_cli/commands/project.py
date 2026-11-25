@@ -4,7 +4,7 @@ import typer
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
-from machina_cli.theme import ok
+from machina_cli.theme import err, ok, warn
 from machina_cli.ui import (
     ACCENT,
     cell,
@@ -93,9 +93,7 @@ def create(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print(
-            "[red]No organization specified. Use --org or set default with `machina org use`.[/red]"
-        )
+        err("No organization specified. Use --org or set default with `machina org use`.")
         raise typer.Exit(1)
 
     if not slug:
@@ -133,9 +131,9 @@ def use(
     # send the new project's requests -- and credentials -- to the old host.
     if previous != project_id and get_config("client_api_url"):
         set_config("client_api_url", "")
-        console.print(
-            "[yellow]Cleared client_api_url: it pointed at the previous project's "
-            "client-api.[/yellow]"
+        warn(
+            "Cleared client_api_url.",
+            detail="it pointed at the previous project's client-api",
         )
 
     # Try to resolve project name for display and shell prompt
@@ -174,9 +172,7 @@ def status(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print(
-            "[red]No organization specified. Use --org or set default with `machina org use`.[/red]"
-        )
+        err("No organization specified. Use --org or set default with `machina org use`.")
         raise typer.Exit(1)
 
     result = client.get(f"organization/{org_id}/api-status")

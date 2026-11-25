@@ -36,9 +36,7 @@ def generate(
         project_id = get_config("default_project_id")
 
     if not org_id or not project_id:
-        console.print(
-            "[red]Organization and project are required. Set defaults or use --org/--project.[/red]"
-        )
+        err("Organization and project are required. Set defaults or use --org/--project.")
         raise typer.Exit(1)
 
     result = client.post(

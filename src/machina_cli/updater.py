@@ -188,9 +188,7 @@ def do_update(force: bool = False, check: bool = False) -> bool:
         latest = get_latest_version()
 
     if not latest:
-        console.print(
-            "  [yellow]Could not check for updates. Check your internet connection.[/yellow]"
-        )
+        warn("Could not check for updates. Check your internet connection.")
         return False
 
     console.print(f"  [dim]Latest version:[/dim]  [bold]v{latest}[/bold]")
@@ -225,9 +223,7 @@ def do_update(force: bool = False, check: bool = False) -> bool:
 
     installation = _installation_kind()
     if installation == "editable":
-        console.print(
-            "  [yellow]Editable development install detected; no files were replaced.[/yellow]"
-        )
+        warn("Editable development install detected; no files were replaced.")
         console.print(
             "  [dim]Update the repository, then reinstall with:[/dim] uv pip install -e ."
         )

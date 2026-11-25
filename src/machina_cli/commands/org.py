@@ -2,19 +2,23 @@
 
 import httpx
 import typer
+from rich.text import Text
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
-from machina_cli.theme import err, ok, warn
+from machina_cli.theme import err, fix, ok, warn
 from machina_cli.ui import (
     ACCENT,
+    MUTED,
     cell,
     console,
     emit_json,
     empty_state,
     extract_collection,
     make_table,
+    meter,
     render_pagination,
+    sparkline,
     status_cell,
     validate_pagination,
 )
@@ -234,9 +238,7 @@ def usage(
 
     org_id = org_id or get_config("default_organization_id")
     if not org_id and not project_id:
-        console.print(
-            "[red]No organization specified. Use --org or set default with `machina org use`.[/red]"
-        )
+        err("No organization specified. Use --org or set default with `machina org use`.")
         raise typer.Exit(1)
 
     now = datetime.now(timezone.utc)
@@ -300,10 +302,8 @@ def usage(
                 f"{scope}/{scope_id}/usage", {**window_body, "page": 1, "page_size": 1}
             )
         except httpx.HTTPError:
-            console.print(
-                f"[red]Usage query for this {scope} timed out or failed. "
-                f"Try a narrower window with --days.[/red]"
-            )
+            err(f"Usage query for this {scope} timed out or failed.")
+            fix("narrow the window with", "--days")
             raise typer.Exit(1)
 
         data = (res or {}).get("data", {}) or {}
@@ -406,29 +406,45 @@ def usage(
         )
     )
 
+    # The shape of the window in one line. A table of daily totals tells you the
+    # numbers; this tells you whether consumption is flat, climbing or spiky,
+    # which is the question anyone opening `org usage` actually has.
+    if len(by_day) > 1:
+        series = [agg["total"] for _, agg in sorted(by_day.items())]
+        trend = Text("  ")
+        trend.append(f"{window_label:<14}", style=MUTED)
+        trend.append_text(sparkline(series))
+        trend.append(f"   peak {max(series):,}/day", style=MUTED)
+        console.print(trend)
+        console.print()
+
     if not breakdown_available:
-        console.print(
-            "[yellow]Note:[/yellow] per-project / per-agent breakdown unavailable "
-            "(usage export failed or timed out); totals and by-day above are exact."
+        warn(
+            "Per-project / per-agent breakdown unavailable.",
+            detail="usage export failed or timed out; totals and by-day are exact",
         )
     elif len(by_project) > 1:
-        pt = make_table("By project", expand=True)
-        pt.add_column("Project", ratio=3, overflow="ellipsis")
+        pt = make_table("By project")
+        pt.add_column("Project", overflow="ellipsis", max_width=34)
         pt.add_column("Calls", justify="right")
         pt.add_column("Total tokens", justify="right")
-        pt.add_column("%", justify="right")
+        pt.add_column("Share", no_wrap=True)
         for pname, agg in sorted(by_project.items(), key=lambda kv: -kv[1]["total"]):
+            share = agg["total"] / grand_total if grand_total else 0
+            bar = meter(share, size=12, style=ACCENT)
+            bar.append(f" {share * 100:5.1f}%", style=MUTED)
             pt.add_row(
                 cell(pname, style="bold"),
                 cell(f"{agg['count']:,}", style="dim"),
                 cell(f"{agg['total']:,}"),
-                cell(f"{agg['total'] / grand_total * 100:.1f}%", style="dim"),
+                bar,
             )
         console.print(pt)
+        console.print()
 
     if breakdown_available and by_agent:
-        at = make_table(f"Top {top} agents", expand=True)
-        at.add_column("Agent", ratio=3, overflow="ellipsis")
+        at = make_table(f"Top {top} agents")
+        at.add_column("Agent", overflow="ellipsis", max_width=34)
         at.add_column("Calls", justify="right")
         at.add_column("Total tokens", justify="right")
         at.add_column("Avg/call", justify="right")
@@ -443,19 +459,24 @@ def usage(
                 cell(f"{agg['total'] / grand_total * 100:.1f}%", style="dim"),
             )
         console.print(at)
+        console.print()
 
     if by_day:
-        dt = make_table("By day", expand=True)
-        dt.add_column("Day", ratio=3)
+        peak = max((agg["total"] for agg in by_day.values()), default=0)
+        dt = make_table("By day")
+        dt.add_column("Day")
         dt.add_column("Calls", justify="right")
         dt.add_column("Total tokens", justify="right")
+        dt.add_column("", no_wrap=True)  # against the window's peak, not a quota
         for day, agg in sorted(by_day.items()):
             dt.add_row(
                 cell(day, style="bold"),
                 cell(f"{agg['count']:,}", style="dim"),
                 cell(f"{agg['total']:,}"),
+                meter(agg["total"] / peak if peak else 0, size=16, style=ACCENT),
             )
         console.print(dt)
+        console.print()
 
     if breakdown_available and has_unnamed:
         console.print(

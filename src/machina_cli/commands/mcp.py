@@ -22,7 +22,7 @@ from machina_cli.commands.credentials import _mask_key
 from machina_cli.config import get_config, resolve_auth_token
 from machina_cli.mcp_session import MCPConnectError
 from machina_cli.project_client import ProjectClient
-from machina_cli.theme import err, warn
+from machina_cli.theme import err, ok, warn
 
 app = typer.Typer(help="Resolve Machina MCP connection details")
 console = Console()
@@ -143,6 +143,10 @@ def url(
 ):
     """Resolve a project's MCP endpoint (URL, transport, auth header).
 
+    This is the primitive. To hand an agent a ready-to-use connection -- the
+    same endpoint plus a token, a server name and optionally a minted project
+    key -- use `machina connect`, which is built on this.
+
     Without --probe the legacy SSE endpoint is reported unverified. With --probe
     the CLI connects (streamable HTTP first, SSE only if the deployment has no
     streamable endpoint) and reports the transport and protocol it negotiated.
@@ -182,9 +186,7 @@ def url(
         server = probed["server"]
         console.print(f"[bold]Protocol:[/bold] {probed['protocol_version']}")
         console.print(f"[bold]Server:[/bold] {server.get('name')} {server.get('version') or ''}")
-        console.print(
-            f"[green]Ready: handshake ok, {probed['tool_count']} tools, health_check ok.[/green]"
-        )
+        ok("Ready", detail=f"handshake ok, {probed['tool_count']} tools, health_check ok.")
     else:
         console.print("[dim]Unverified — pass --probe to connect and check readiness.[/dim]")
 

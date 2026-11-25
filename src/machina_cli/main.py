@@ -227,14 +227,34 @@ def login(
     with_credentials: bool = typer.Option(
         False, "--with-credentials", help="Use username/password instead of browser"
     ),
+    username: str = typer.Option(
+        None, "--username", "-u", help="Username (requires --with-credentials)"
+    ),
+    password: str = typer.Option(
+        None, "--password", "-p", help="Password (requires --with-credentials)"
+    ),
     no_interactive: bool = typer.Option(
-        False, "--no-interactive", hidden=True, help="Don't start REPL after login"
+        False, "--no-interactive", help="Authenticate and exit, instead of opening the session"
     ),
 ):
-    """Login to the Machina platform. Opens browser by default."""
-    do_login(api_key=api_key, with_credentials=with_credentials)
+    """Log in and open an interactive session.
 
-    # After successful login, start the REPL so the user lands inside the CLI
+    Default: opens the browser for Clerk authentication (magic link / SSO). Use
+    --api-key for CI/CD, or --with-credentials for username/password.
+
+    This and `machina auth login` share one implementation and take the same
+    flags. The only difference is what happens after: this one drops you into
+    the interactive session, `auth login` returns to your shell. Pass
+    --no-interactive here to get the `auth login` behaviour.
+    """
+    do_login(
+        api_key=api_key,
+        username=username,
+        password=password,
+        with_credentials=with_credentials,
+    )
+
+    # After a successful login, land inside the CLI rather than back at the shell.
     if not no_interactive:
         from machina_cli.repl import start_repl
 
@@ -260,7 +280,13 @@ def connect_command(
     ),
     timeout: float = typer.Option(15.0, "--timeout", help="Probe timeout in seconds"),
 ):
-    """Resolve a project's MCP connection for an external agent (e.g. sportsclaw)."""
+    """Wire an external agent (e.g. sportsclaw) to a project's MCP.
+
+    Resolves the endpoint exactly as `machina mcp url` does, then pairs it with
+    an auth token and a server name the agent can register directly. Use
+    `mcp url` when you only want the endpoint, and `mcp tools` to see what it
+    serves; use this when something needs to connect.
+    """
     connect.run(project_id, json_output, reveal, probe, name, mint, org, timeout)
 
 
