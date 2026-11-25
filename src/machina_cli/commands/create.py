@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import httpx
 import typer
 from rich.console import Console
+from machina_cli.theme import err, ok
 
 app = typer.Typer(help="Create projects from official Machina starters")
 console = Console()
@@ -135,7 +136,7 @@ def create_ai_app(
         if json_output:
             print(json.dumps({"error": message}))
         else:
-            console.print(f"[red]{message}[/red]")
+            err(f"{message}")
         raise typer.Exit(1)
 
     destination.mkdir(parents=True, exist_ok=True)
@@ -147,7 +148,7 @@ def create_ai_app(
         if json_output:
             print(json.dumps({"error": str(exc)}))
         else:
-            console.print(f"[red]Could not create app:[/red] {exc}")
+            err("Could not create app", detail=f"{exc}")
         raise typer.Exit(1) from exc
 
     git_initialized = False if no_git else _init_git(destination)
@@ -163,7 +164,8 @@ def create_ai_app(
         print(json.dumps(payload))
         return
 
-    console.print(f"\n[green]Created {name}[/green] at [bold]{destination}[/bold]")
+    console.print()
+    ok(f"Created {name}", detail=str(destination))
     if not no_git and not git_initialized:
         console.print(
             "[yellow]Git was not initialized; run `git init` when Git is available.[/yellow]"

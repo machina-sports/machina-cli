@@ -8,6 +8,7 @@ from rich.panel import Panel
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config
+from machina_cli.theme import err, fix, ok
 
 app = typer.Typer(help="Deployment management")
 console = Console()
@@ -24,7 +25,8 @@ def deploy_start(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print("[red]No organization specified. Use --org or set default.[/red]")
+        err("No organization specified.")
+        fix("pass --org, or set a default with", "machina org use <id>")
         raise typer.Exit(1)
 
     console.print(f"Deploying Client API for organization {org_id}...")
@@ -36,7 +38,7 @@ def deploy_start(
         },
     )
 
-    console.print("[green]Deployment started successfully.[/green]")
+    ok("Deployment started successfully.")
     data = result.get("data", {})
     if data:
         console.print(Panel.fit(str(data), title="Deployment Result"))
@@ -56,7 +58,8 @@ def status(
         if json_output:
             print(json.dumps({"error": "no organization specified"}))
             raise typer.Exit(1)
-        console.print("[red]No organization specified. Use --org or set default.[/red]")
+        err("No organization specified.")
+        fix("pass --org, or set a default with", "machina org use <id>")
         raise typer.Exit(1)
 
     try:
@@ -92,11 +95,12 @@ def restart(
     if not org_id:
         org_id = get_config("default_organization_id")
     if not org_id:
-        console.print("[red]No organization specified. Use --org or set default.[/red]")
+        err("No organization specified.")
+        fix("pass --org, or set a default with", "machina org use <id>")
         raise typer.Exit(1)
 
     console.print(f"Restarting API for organization {org_id}...")
 
     client.post(f"organization/{org_id}/restart-api", {})
 
-    console.print("[green]API restarted successfully.[/green]")
+    ok("API restarted successfully.")

@@ -23,6 +23,7 @@ from machina_cli.config import (
     resolve_auth_token,
     store_credential,
 )
+from machina_cli.theme import err, fix
 
 console = Console(stderr=True)
 
@@ -110,7 +111,7 @@ def _get_project_session(project_id: str) -> dict:
     token = data.get("token") or data.get("project_key")
 
     if not token:
-        console.print("[red]Failed to get project session. Check project ID.[/red]")
+        err("Failed to get project session. Check project ID.")
         raise SystemExit(1)
 
     # Decode JWT to get the Client API URL
@@ -126,7 +127,7 @@ def _get_project_session(project_id: str) -> dict:
         api_url = ""
 
     if not api_url:
-        console.print("[red]Project token missing API URL.[/red]")
+        err("Project token missing API URL.")
         raise SystemExit(1)
 
     # Store for reuse
@@ -193,9 +194,11 @@ class ProjectClient:
             # every mode (env API key, stored API key, session token).
             _, token = resolve_auth_token()
             if not token:
-                console.print("[red]Not authenticated. Run `machina login` first.[/red]")
+                err("Not authenticated.")
+                fix("sign in with", "machina login")
                 raise SystemExit(1)
-            console.print("[red]No project selected. Run `machina project use <id>` first.[/red]")
+            err("No project selected.")
+            fix("select one with", "machina project use <id>")
             raise SystemExit(1)
 
         session = _get_project_session(self.project_id)
@@ -241,7 +244,7 @@ class ProjectClient:
             # Clear cached and stored project token
             _project_cache.pop(_cache_key(self.project_id), None)
             _clear_credential(f"project_token_{self.project_id}")
-            console.print(f"[red]{error_msg or 'Project session expired.'}[/red]")
+            err(f"{error_msg or 'Project session expired.'}")
             console.print(
                 "[yellow]Run the command again to re-authenticate, or `machina login` to refresh your session.[/yellow]"
             )
@@ -250,14 +253,14 @@ class ProjectClient:
             fallback = _STATUS_MESSAGES.get(status) or (
                 "Client API error." if status >= 500 else f"Request rejected (HTTP {status})."
             )
-            console.print(f"[red]{error_msg or fallback}[/red]")
+            err(f"{error_msg or fallback}")
             raise ProjectAPIError(error_msg or fallback.rstrip("."), status, details)
 
         # A 200 whose body says it failed is a failure: the legacy controllers
         # return {"status": false, "error": {...}} with HTTP 200 (and the agent
         # executor's not-found is {"status": 404, "message": ...}).
         if isinstance(data, dict) and _body_failed(data.get("status")):
-            console.print(f"[red]Error: {error_msg or 'Unknown error'}[/red]")
+            err(f"Error: {error_msg or 'Unknown error'}")
             raise ProjectAPIError(error_msg or "request failed", status, details)
 
         return data
@@ -269,7 +272,7 @@ class ProjectClient:
                 response = client.get(url, headers=self._headers(), params=params)
                 return self._handle_response(response)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            err(f"Cannot reach Client API at {self.api_url}")
             raise SystemExit(1)
 
     def post(self, path: str, json_data: dict | None = None, timeout: float | None = None) -> dict:
@@ -279,7 +282,7 @@ class ProjectClient:
                 response = client.post(url, headers=self._headers(), json=json_data or {})
                 return self._handle_response(response)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            err(f"Cannot reach Client API at {self.api_url}")
             raise SystemExit(1)
 
     def put(self, path: str, json_data: dict | None = None) -> dict:
@@ -289,7 +292,7 @@ class ProjectClient:
                 response = client.put(url, headers=self._headers(), json=json_data or {})
                 return self._handle_response(response)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            err(f"Cannot reach Client API at {self.api_url}")
             raise SystemExit(1)
 
     def delete(self, path: str) -> dict:
@@ -299,7 +302,7 @@ class ProjectClient:
                 response = client.delete(url, headers=self._headers())
                 return self._handle_response(response)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            err(f"Cannot reach Client API at {self.api_url}")
             raise SystemExit(1)
 
     def post_file(self, path: str, file_path: str, data: dict | None = None) -> dict:
@@ -319,5 +322,5 @@ class ProjectClient:
                     response = client.post(url, headers=headers, data=data, files=files)
                 return self._handle_response(response)
         except httpx.ConnectError:
-            console.print(f"[red]Cannot reach Client API at {self.api_url}[/red]")
+            err(f"Cannot reach Client API at {self.api_url}")
             raise SystemExit(1)

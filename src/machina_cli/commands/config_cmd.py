@@ -5,7 +5,10 @@ import re
 
 import typer
 
+from rich.text import Text
+
 from machina_cli.config import get_config, load_config, set_config
+from machina_cli.theme import ACCENT, MUTED, warn
 from machina_cli.ui import cell, console, make_table
 
 app = typer.Typer(help="Configuration management")
@@ -26,7 +29,7 @@ def config_set(
 ):
     """Set a configuration value."""
     set_config(key, value)
-    console.print(f"[green]{key}[/green] = {value}")
+    console.print(Text.assemble(("  " + key, ACCENT), (" = ", MUTED), (str(value), "bold")))
 
 
 @app.command("get")
@@ -41,7 +44,7 @@ def config_get(
         if json_output:
             print(json.dumps({"key": key, "value": None, "error": "key not found"}))
             raise typer.Exit(1)
-        console.print(f"[yellow]Key '{key}' not found.[/yellow]")
+        warn(f"Key '{key}' not found.")
         return
     if value and not reveal and _SECRET_KEY.search(key):
         value = "***redacted***"

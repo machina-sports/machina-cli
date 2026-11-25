@@ -17,6 +17,7 @@ from machina_cli.ui import (
     status_cell,
     validate_pagination,
 )
+from machina_cli.theme import warn
 
 app = typer.Typer(help="Execution management")
 
@@ -57,7 +58,7 @@ def get_execution(
         return
 
     if not data or not isinstance(data, dict):
-        console.print("[yellow]No execution data found.[/yellow]")
+        warn("No execution data found.")
         return
 
     status = data.get("status", "unknown")
@@ -146,7 +147,7 @@ def _get_workflow_run(client: ProjectClient, run_id: str, json_output: bool):
         console.print_json(json.dumps({**run, "outcome": outcome}, default=str))
         return
     if not run:
-        console.print("[yellow]No execution data found.[/yellow]")
+        warn("No execution data found.")
         return
     audit = run.get("audit") or {}
     console.print(

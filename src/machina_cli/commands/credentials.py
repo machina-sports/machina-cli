@@ -15,6 +15,7 @@ from machina_cli.ui import (
     render_pagination,
     validate_pagination,
 )
+from machina_cli.theme import err, fix, ok
 
 app = typer.Typer(help="API key management")
 
@@ -51,7 +52,9 @@ def generate(
     )
 
     api_key = result.get("data", {}).get("api_key", "")
-    console.print("\n[green]API key generated:[/green]\n")
+    console.print()
+    ok("API key generated.")
+    console.print()
     console.print(f"  [bold]{api_key}[/bold]\n")
     console.print("[dim]Save this key securely — it won't be shown again.[/dim]")
 
@@ -86,7 +89,8 @@ def list_keys(
         if json_output:
             print(json.dumps({"error": "project id required"}))
             raise typer.Exit(1)
-        console.print("[red]Project ID required. Set default or use --project.[/red]")
+        err("No project selected.")
+        fix("pass --project, or set a default with", "machina project use <id>")
         raise typer.Exit(1)
 
     try:
@@ -133,14 +137,14 @@ def list_keys(
     if copy:
         target = next((k for k in keys if k.get("name") == copy), None)
         if not target:
-            console.print(f"[red]No key named '{copy}' found.[/red]")
+            err(f"No key named '{copy}' found.")
             raise typer.Exit(1)
         key_value = target.get("key", "")
         try:
             import subprocess
 
             subprocess.run(["pbcopy"], input=key_value.encode(), check=True)
-            console.print(f"[green]Copied '{copy}' key to clipboard.[/green]")
+            ok(f"Copied '{copy}' key to clipboard.")
         except Exception:
             # Fallback: just print the key for manual copy
             console.print(f"\n  {key_value}\n")
@@ -186,4 +190,4 @@ def revoke(
 
     client.post("system/api/revoke-key", {"api_key_id": key_id})
 
-    console.print(f"[green]API key {key_id} revoked.[/green]")
+    ok(f"API key {key_id} revoked.")

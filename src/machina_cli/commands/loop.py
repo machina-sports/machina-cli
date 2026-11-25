@@ -13,7 +13,8 @@ import time
 import typer
 
 from machina_cli.loop_client import DEFAULT_PERSONA, LoopClient
-from machina_cli.ui import cell, console, make_table, status_cell
+from machina_cli.ui import cell, console, emit_json, empty_state, make_table, status_cell
+from machina_cli.theme import ok
 
 app = typer.Typer(help="Durable agentic turn loop (harness)")
 
@@ -67,7 +68,7 @@ def _render_verdict(session: dict) -> None:
             f"[yellow]⚠ needs review[/] — {reason or 'failed verification'} [dim](evaluator: {model}{repaired})[/]"
         )
     elif v.get("verdict") == "pass":
-        console.print(f"[green]✓ verified[/] [dim](evaluator: {model}{repaired})[/]")
+        ok(f"✓ verified[/] [dim](evaluator: {model}{repaired})")
 
 
 def _watch(
@@ -130,7 +131,7 @@ def run(
 ):
     """Start a new loop session."""
     session_id = LoopClient().start(prompt, persona_agent=persona)
-    console.print(f"[green]session started[/] {session_id}")
+    ok("Session started", detail=str(session_id))
     if watch:
         _watch(session_id, min_turn=1)
     else:
@@ -157,7 +158,7 @@ def say(
     prior_turn = prior.get("turn", 0)
     prior_entries = len(prior.get("entries", []))
     client.say(session_id, message)
-    console.print("[green]queued[/]")
+    ok("queued")
     if watch:
         _watch(session_id, min_turn=prior_turn + 1, since_entries=prior_entries)
 
@@ -168,17 +169,21 @@ def stop(
 ):
     """Pause a running session."""
     LoopClient().stop(session_id)
-    console.print(f"[yellow]stopped[/] {session_id}")
+    ok("Session stopped", detail=str(session_id))
 
 
 @app.command()
 def sessions(
     limit: int = typer.Option(30, "--limit", "-n", help="Max sessions to list"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """List recent loop sessions."""
     rows = LoopClient().list_sessions(limit=limit)
+    if json_output:
+        emit_json(rows)
+        return
     if not rows:
-        console.print("[dim]No sessions yet.[/]")
+        empty_state("loop sessions")
         return
     table = make_table("Loop sessions", expand=True)
     table.add_column("Session", ratio=3, overflow="ellipsis")

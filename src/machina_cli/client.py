@@ -4,6 +4,7 @@ import httpx
 from rich.console import Console
 
 from machina_cli.config import get_api_url, get_credential, resolve_auth_token
+from machina_cli.theme import err, fix
 
 console = Console(stderr=True)
 
@@ -22,7 +23,8 @@ class MachinaClient:
         if header_name and token:
             headers[header_name] = token
         else:
-            console.print("[red]Not authenticated. Run `machina login` first.[/red]")
+            err("Not authenticated.")
+            fix("sign in with", "machina login")
             raise SystemExit(1)
         return headers
 

@@ -27,6 +27,7 @@ import typer
 
 from machina_cli.project_client import ProjectAPIError, ProjectClient
 from machina_cli.ui import console
+from machina_cli.theme import err, ok
 
 SCHEMA = "machina.config/v1"
 
@@ -163,7 +164,7 @@ def _emit(json_output: bool, kind: str, operation: str, record: dict | None, ref
         )
         return
     name = (record or {}).get("name", "")
-    console.print(f"[green]{kind.capitalize()} {operation}:[/green] {name} [dim]{ref_id}[/dim]")
+    ok(f"{kind.capitalize()} {operation}", detail=f"{name}  {ref_id}")
     if record is not None:
         console.print_json(json.dumps(record, default=str))
 
@@ -176,7 +177,7 @@ def _guard(json_output: bool, action):
         if json_output:
             print(json.dumps({"schema": SCHEMA, **error.to_payload()}))
         else:
-            console.print(f"[red]{error.message}[/red]")
+            err(f"{error.message}")
         raise typer.Exit(1) from None
     except ProjectAPIError as error:
         # The human message already went to stderr from the client.

@@ -1,9 +1,16 @@
 """Shared terminal rendering helpers.
 
-The CLI talks to a few API generations.  Search endpoints therefore return
-collections and pagination either at the top level or nested below ``data``.
-Keeping the small compatibility layer here prevents every command from making
+Two jobs live here, and they are deliberately separate:
+
+**Response shapes.** The CLI talks to a few API generations, so search endpoints
+return collections and pagination either at the top level or nested below
+``data``. The small compatibility layer below keeps every command from making
 slightly different assumptions about the same response.
+
+**Presentation.** Everything visual is :mod:`machina_cli.theme`. This module
+re-exports the parts commands need, so a command has one import site and the
+look of the CLI has one definition. New code can import either; prefer
+``theme`` for anything that is purely about appearance.
 """
 
 from __future__ import annotations
@@ -16,15 +23,58 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import typer
-from rich import box
-from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
-ACCENT = "#FF5C1F"
-MUTED = "grey62"
+from machina_cli import theme
+from machina_cli.theme import (
+    ACCENT,
+    DIM,
+    INK,
+    LINE,
+    MUTED,
+    console,
+    err,
+    fix,
+    hint,
+    info,
+    kv,
+    meter,
+    ok,
+    rule,
+    sparkline,
+    warn,
+)
 
-console = Console(highlight=False)
+__all__ = [
+    "ACCENT",
+    "DIM",
+    "INK",
+    "LINE",
+    "MUTED",
+    "bool_cell",
+    "cell",
+    "console",
+    "datetime_cell",
+    "emit_json",
+    "empty_state",
+    "err",
+    "extract_collection",
+    "extract_pagination",
+    "fix",
+    "hint",
+    "info",
+    "kv",
+    "make_table",
+    "meter",
+    "ok",
+    "pagination_total",
+    "render_pagination",
+    "rule",
+    "sparkline",
+    "status_cell",
+    "validate_pagination",
+    "warn",
+]
 
 
 def emit_json(value: Any) -> None:
@@ -94,18 +144,9 @@ def validate_pagination(page: int, page_size: int) -> None:
         raise typer.BadParameter("must be between 1 and 500", param_hint="--limit")
 
 
-def make_table(title: str, *, expand: bool = False) -> Table:
+def make_table(title: str | None = None, *, expand: bool = False):
     """Create a consistent, compact table that degrades well on narrow TTYs."""
-    return Table(
-        title=Text(title, style="bold"),
-        title_justify="left",
-        header_style=f"bold {ACCENT}",
-        border_style="grey35",
-        box=box.SIMPLE_HEAD,
-        collapse_padding=True,
-        pad_edge=False,
-        expand=expand,
-    )
+    return theme.table(title, expand=expand)
 
 
 def cell(value: Any, *, style: str = "", empty: str = "—") -> Text:
@@ -117,43 +158,16 @@ def cell(value: Any, *, style: str = "", empty: str = "—") -> Text:
 
 
 def status_cell(value: Any) -> Text:
-    raw = str(value if value not in (None, "") else "unknown")
-    normalized = raw.lower().replace("_", "-")
-    if normalized in {
-        "true",
-        "active",
-        "online",
-        "success",
-        "completed",
-        "approved",
-        "executed",
-        "agent-executed",
-    }:
-        style = "green"
-    elif (
-        normalized
-        in {"false", "failed", "failure", "error", "offline", "rejected", "cancelled", "canceled"}
-        or "fail" in normalized
-    ):
-        style = "red"
-    elif normalized in {
-        "pending",
-        "running",
-        "processing",
-        "scheduled",
-        "draft",
-        "inactive",
-        "queued",
-        "unknown",
-    }:
-        style = "yellow"
-    else:
-        style = MUTED
-    return Text(raw, style=style)
+    """A status word carrying its own glyph, so state survives a `--no-color` pipe."""
+    return theme.state(value)
 
 
 def bool_cell(value: Any, *, true_label: str = "yes", false_label: str = "no") -> Text:
-    return Text(true_label if bool(value) else false_label, style="green" if value else MUTED)
+    glyph = theme.glyph("ok") if value else theme.glyph("wait")
+    label = true_label if bool(value) else false_label
+    return Text.assemble(
+        (f"{glyph} ", theme.OK if value else MUTED), (label, theme.OK if value else MUTED)
+    )
 
 
 def datetime_cell(value: Any) -> Text:
@@ -173,8 +187,11 @@ def datetime_cell(value: Any) -> Text:
 
 
 def empty_state(noun: str, *, positive: bool = False) -> None:
-    style = "green" if positive else "yellow"
-    console.print(Text(f"No {noun} found.", style=style))
+    """Nothing to show is information, not a failure -- say it quietly."""
+    if positive:
+        theme.ok(f"No {noun}.")
+    else:
+        console.print(theme.status("info", f"No {noun} found."))
 
 
 def render_pagination(
@@ -191,8 +208,8 @@ def render_pagination(
         if count == page_size:
             console.print(
                 Text.assemble(
-                    (f"Page {page} · {count} {noun}", MUTED),
-                    (f"   next: --page {page + 1}", "dim"),
+                    (f"  Page {page} · {count} {noun}", MUTED),
+                    (f"   next: --page {page + 1}", DIM),
                 )
             )
         return
@@ -200,7 +217,7 @@ def render_pagination(
     pages = max(1, math.ceil(total / page_size))
     start = (page - 1) * page_size + 1 if count else 0
     end = min(start + count - 1, total) if count else 0
-    footer = Text(f"Page {page}/{pages} · {start}–{end} of {total} {noun}", style=MUTED)
+    footer = Text(f"  Page {page}/{pages} · {start}–{end} of {total} {noun}", style=MUTED)
     if page < pages:
-        footer.append(f"   next: --page {page + 1}", style="dim")
+        footer.append(f"   next: --page {page + 1}", style=DIM)
     console.print(footer)

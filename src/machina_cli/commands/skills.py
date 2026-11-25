@@ -11,6 +11,7 @@ from machina_cli import mcp_session
 from machina_cli.commands import agent as agent_cmd
 from machina_cli.commands import template
 from machina_cli.commands import workflow as workflow_cmd
+from machina_cli.theme import err, warn
 
 app = typer.Typer(help="Skills management")
 console = Console()
@@ -206,7 +207,7 @@ def run_skill(
         return _run_remote(skill_name, params, message, project_id, json_output, timeout)
     manifest_path, skill = _load_skill_manifest(skill_name)
     if not skill:
-        console.print(f"[red]Skill manifest not found for:[/red] {skill_name}")
+        err("Skill manifest not found for", detail=f"{skill_name}")
         console.print(
             "[dim]Expected a local skill.yml. Install or bootstrap the skill first.[/dim]"
         )
@@ -235,12 +236,12 @@ def run_skill(
                 selected = (kind, name)
                 break
         if not selected:
-            console.print(f"[red]Entrypoint not found:[/red] {entrypoint}")
+            err("Entrypoint not found", detail=f"{entrypoint}")
             raise typer.Exit(1)
     elif len(choices) == 1:
         selected = choices[0]
     else:
-        console.print("[yellow]Multiple entrypoints found. Use --entrypoint with one of:[/yellow]")
+        warn("Multiple entrypoints found. Use --entrypoint with one of:")
         for kind, name in choices:
             console.print(f"  - {kind}: {name}")
         raise typer.Exit(1)
@@ -395,7 +396,7 @@ def show_skill(
         )
     )
     if view["instruction_only"]:
-        console.print("[yellow]Instruction-only:[/yellow] no workflow/agent entrypoints supplied.")
+        warn("Instruction-only", detail="no workflow/agent entrypoints supplied.")
     for kind in ("workflows", "agents"):
         for entry in view[kind]:
             label = entry.get("name") if isinstance(entry, dict) else entry
@@ -454,7 +455,7 @@ def skill_docs(
         for doc in documents:
             console.rule(f"{doc['name']} · {doc['id']}")
             if "error" in doc:
-                console.print(f"[red]Unavailable:[/red] {doc['error']}")
+                err("Unavailable", detail=str(doc["error"]))
             elif isinstance(doc["value"], str):
                 console.print(Text(doc["value"]))
             else:
@@ -476,7 +477,7 @@ def _params_to_context(params: list[str] | None) -> dict:
     context = {}
     for item in params or []:
         if "=" not in item:
-            console.print(f"[red]Invalid parameter (expected key=value):[/red] {item}")
+            err("Invalid parameter (expected key=value)", detail=f"{item}")
             raise typer.Exit(1)
         key, value = item.split("=", 1)
         context[key] = value
@@ -549,7 +550,7 @@ def _run_remote(skill, params, message, project_id, json_output, timeout):
         _print_json(payload)
         return
     console.print(f"[bold]Skill:[/bold] {record.get('name')}  [dim]{record.get('_id')}[/dim]")
-    console.print(f"[yellow]Accepted (not completed):[/yellow] skill_run_id {run_id}")
+    warn("Accepted (not completed)", detail=f"skill_run_id {run_id}")
     console.print(f"[dim]Retrieve the outcome with[/dim] {payload['result_command']}")
 
 
@@ -610,7 +611,7 @@ def skill_result(
         console.print(f"[bold]Run:[/bold] {skill_run_id}  [{style}]{outcome}[/{style}]")
         console.print(f"[bold]Status:[/bold] {run.get('status')}")
         if run.get("error"):
-            console.print(f"[red]Error:[/red] {run['error']}")
+            err(str(run["error"]))
         if outcome in ("completed", "partial", "failed") and run.get("response") is not None:
             console.print_json(data=run["response"], default=str)
     raise typer.Exit(_EXIT.get(outcome, 3))

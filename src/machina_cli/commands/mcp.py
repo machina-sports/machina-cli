@@ -22,6 +22,7 @@ from machina_cli.commands.credentials import _mask_key
 from machina_cli.config import get_config, resolve_auth_token
 from machina_cli.mcp_session import MCPConnectError
 from machina_cli.project_client import ProjectClient
+from machina_cli.theme import err, warn
 
 app = typer.Typer(help="Resolve Machina MCP connection details")
 console = Console()
@@ -65,11 +66,11 @@ def fail(error: MCPConnectError, json_output: bool):
     if json_output:
         print(json.dumps(error.to_payload()))
     else:
-        console.print(f"[red]{error.message}.[/red]")
+        err(f"{error.message}.")
         if error.url:
             console.print(f"[dim]Endpoint: {error.url}[/dim]")
         if error.hint:
-            console.print(f"[yellow]{error.hint}[/yellow]")
+            warn(f"{error.hint}")
     raise typer.Exit(1)
 
 

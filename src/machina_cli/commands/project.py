@@ -1,7 +1,6 @@
 """Project management commands."""
 
 import typer
-from rich.panel import Panel
 
 from machina_cli.client import MachinaClient
 from machina_cli.config import get_config, set_config
@@ -12,11 +11,14 @@ from machina_cli.ui import (
     emit_json,
     empty_state,
     extract_collection,
+    kv,
     make_table,
     render_pagination,
+    rule,
     status_cell,
     validate_pagination,
 )
+from machina_cli.theme import ok
 
 app = typer.Typer(help="Project management")
 
@@ -111,7 +113,7 @@ def create(
     )
 
     proj_id = result.get("data", {}).get("id", "")
-    console.print(f"[green]Project created:[/green] {name} (ID: {proj_id})")
+    ok("Project created", detail=f"{name} (ID: {proj_id})")
 
     if not get_config("default_project_id"):
         set_config("default_project_id", proj_id)
@@ -164,6 +166,7 @@ def use(
 @app.command()
 def status(
     org_id: str | None = typer.Option(None, "--org", "-o", help="Organization ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Show project deployment status."""
     client = MachinaClient()
@@ -179,15 +182,12 @@ def status(
     result = client.get(f"organization/{org_id}/api-status")
     data = result.get("data", {})
 
-    status_value = data.get("status", "unknown")
-    color = (
-        "green" if status_value == "online" else "red" if status_value == "offline" else "yellow"
-    )
+    if json_output:
+        emit_json(data)
+        return
 
+    console.print(rule("Deployment status"))
+    console.print()
     console.print(
-        Panel.fit(
-            f"[bold]Status:[/bold] [{color}]{status_value}[/{color}]\n"
-            f"[bold]Organization:[/bold] {org_id}",
-            title="Deployment Status",
-        )
+        kv([("status", status_cell(data.get("status", "unknown"))), ("organization", org_id)])
     )
